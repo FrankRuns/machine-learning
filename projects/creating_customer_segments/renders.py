@@ -52,7 +52,7 @@ def cluster_results(reduced_data, preds, centers, pca_samples):
 	fig, ax = plt.subplots(figsize = (14,8))
 
 	# Color map
-	cmap = cm.get_cmap('gist_rainbow')
+	cmap = cm.get_cmap('gist_earth')
 
 	# Color the points based on assigned cluster
 	for i, cluster in plot_data.groupby('Cluster'):   
@@ -61,13 +61,13 @@ def cluster_results(reduced_data, preds, centers, pca_samples):
 
 	# Plot centers with indicators
 	for i, c in enumerate(centers):
-	    ax.scatter(x = c[0], y = c[1], color = 'white', edgecolors = 'black', \
+	    ax.scatter(x = c[0], y = c[1], color = 'yellow', edgecolors = 'black', \
 	               alpha = 1, linewidth = 2, marker = 'o', s=200);
 	    ax.scatter(x = c[0], y = c[1], marker='$%d$'%(i), alpha = 1, s=100);
 
 	# Plot transformed sample points 
 	ax.scatter(x = pca_samples[:,0], y = pca_samples[:,1], \
-	           s = 150, linewidth = 4, color = 'black', marker = 'x');
+	           s = 150, linewidth = 4, color = 'orange', marker = 'x');
 
 	# Set plot title
 	ax.set_title("Cluster Learning on PCA-Reduced Data - Centroids Marked by Number\nTransformed Sample Data Marked by Black Cross");
