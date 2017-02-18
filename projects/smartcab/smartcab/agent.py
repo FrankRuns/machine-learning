@@ -8,7 +8,7 @@ class LearningAgent(Agent):
     """ An agent that learns to drive in the Smartcab world.
         This is the object you will be modifying. """ 
 
-    def __init__(self, env, learning=False, epsilon=1.0, alpha=0.5):
+    def __init__(self, env, learning=True, epsilon=0.97, alpha=0.97):
         super(LearningAgent, self).__init__(env)     # Set the agent in the evironment 
         self.planner = RoutePlanner(self.env, self)  # Create a route planner
         self.valid_actions = self.env.valid_actions  # The set of valid actions
@@ -24,6 +24,7 @@ class LearningAgent(Agent):
         ###########
         # Set any additional class parameters as needed
 
+        self.n_trials=1
 
     def reset(self, destination=None, testing=False):
         """ The reset function is called at the beginning of each trial.
@@ -39,6 +40,25 @@ class LearningAgent(Agent):
         # Update epsilon using a decay function of your choice
         # Update additional class parameters as needed
         # If 'testing' is True, set epsilon and alpha to 0
+
+        if testing==True:
+            self.epsilon = 0.0
+            self.alpha = 0.0
+        else:
+            self.epsilon = math.pow(0.97, 0.1*self.n_trials)
+            #self.alpha = math.pow(0.97, 0.02*self.n_trials) # if not D and A, go back to 0.05
+
+            #self.epsilon = math.cos(0.9*self.n_trials/500)
+            #self.alpha = math.cos(0.9*self.n_trials/1500)
+
+            # self.epsilon = 1/(math.pow(self.n_trials,1/1.6))
+            # self.alpha = self.alpha * 0.95
+            
+            # self.epsilon = 1/math.pow(self.n_trials,2)
+            # self.epsilon = math.exp(-self.alpha*self.n_trials)
+            # self.epsilon = math.cos(self.alpha*self.n_trials)
+            # self.epsilon = self.epsilon * math.cos(self.n_trials)
+        self.n_trials += 1
 
         return None
 
@@ -56,7 +76,8 @@ class LearningAgent(Agent):
         ## TO DO ##
         ###########
         # Set 'state' as a tuple of relevant data for the agent        
-        state = None
+        state = (waypoint, inputs['light'], inputs['left'], inputs['right'], inputs['oncoming'])
+        state = [str(el) for el in state]
 
         return state
 
@@ -70,9 +91,31 @@ class LearningAgent(Agent):
         ###########
         # Calculate the maximum Q-value of all actions for a given state
 
-        maxQ = None
+        # make state usable
+        kurrent_state = ''.join(state)
+ 
+        # bizarre code behavior.. sometimes createQ doesn't run
+        # in the event, I create the key in Q
+        # holder = {'left' : 0.0, 'right' : 0.0, 'forward' : 0.0, None : 0.0}
+        holder = {'left' : 0.0, 'right' : 0.0, 'forward' : 0.0, None : 0.0}
+        # someone mentioned initializing Qval to 20...
 
-        return maxQ 
+        # find largest q-val for this state
+        # actually need the key for the largest value - used in choose_action
+        # help from http://stackoverflow.com/questions/268272/getting-key-with-maximum-value-in-dictionary
+        if kurrent_state not in self.Q.keys():
+            self.Q[kurrent_state] = holder
+            # maxQ = max(self.Q[kurrent_state], key=self.Q[kurrent_state].get)
+            maxQ = [key for key,val in self.Q[kurrent_state].iteritems() if val == max(self.Q[kurrent_state].values())]
+            if len(maxQ)>1:
+            	maxQ = [random.choice(maxQ)]
+        else:
+            # maxQ = max(self.Q[kurrent_state], key=self.Q[kurrent_state].get)
+            maxQ = [key for key,val in self.Q[kurrent_state].iteritems() if val == max(self.Q[kurrent_state].values())]
+            if len(maxQ)>1:
+            	maxQ = [random.choice(maxQ)]
+
+        return maxQ[0]
 
 
     def createQ(self, state):
@@ -85,7 +128,17 @@ class LearningAgent(Agent):
         # If it is not, create a new dictionary for that state
         #   Then, for each action available, set the initial Q-value to 0.0
 
-        return
+        kurrent_state = ''.join(state)
+        best_action = self.choose_action(state)
+
+        # holder = {'left' : 0.0, 'right' : 0.0, 'forward' : 0.0, None : 0.0}
+        holder = {'left' : 0.0, 'right' : 0.0, 'forward' : 0.0, None : 0.0}
+        # someone mentioned initializing Qval to 20...
+
+        if kurrent_state not in self.Q.keys():
+            self.Q[kurrent_state] = holder
+
+        return self.Q
 
 
     def choose_action(self, state):
@@ -95,7 +148,6 @@ class LearningAgent(Agent):
         # Set the agent state and default action
         self.state = state
         self.next_waypoint = self.planner.next_waypoint()
-        action = None
 
         ########### 
         ## TO DO ##
@@ -104,6 +156,15 @@ class LearningAgent(Agent):
         # When learning, choose a random action with 'epsilon' probability
         #   Otherwise, choose an action with the highest Q-value for the current state
  
+        # action = random.choice(self.env.valid_actions)
+
+        rvalue = random.random()
+        if rvalue < self.epsilon:
+            #action = random.choice(self.env.valid_actions)
+            action = self.next_waypoint
+        else:
+            action = self.get_maxQ(state)
+
         return action
 
 
@@ -117,6 +178,13 @@ class LearningAgent(Agent):
         ###########
         # When learning, implement the value iteration update rule
         #   Use only the learning rate 'alpha' (do not use the discount factor 'gamma')
+
+        kurrent_state = ''.join(state)
+        best_action = self.choose_action(state)   
+
+        # self.Q[kurrent_state][best_action] = self.alpha * (reward - self.Q[kurrent_state][best_action])
+        # self.Q[kurrent_state][best_action] = self.Q[kurrent_state][best_action] + (self.alpha * reward)
+        self.Q[kurrent_state][best_action] = self.Q[kurrent_state][best_action] + self.alpha * (reward - self.Q[kurrent_state][best_action])
 
         return
 
@@ -159,7 +227,8 @@ def run():
     # Follow the driving agent
     # Flags:
     #   enforce_deadline - set to True to enforce a deadline metric
-    env.set_primary_agent(agent)
+    env.set_primary_agent(agent, enforce_deadline=True) 
+        # 'enforce_deadline' - Set this to True to force the driving agent to capture whether it reaches the destination in time.
 
     ##############
     # Create the simulation
@@ -168,14 +237,16 @@ def run():
     #   display      - set to False to disable the GUI if PyGame is enabled
     #   log_metrics  - set to True to log trial and simulation results to /logs
     #   optimized    - set to True to change the default log file name
-    sim = Simulator(env)
-    
+    sim = Simulator(env, update_delay=0.01, display=False, log_metrics=True, optimized=True)
+        # 'update_delay' - Set this to a small value (such as 0.01) to reduce the time between steps in each trial.
+        # 'log_metrics' - Set this to True to log the simluation results as a .csv file in /logs/. 
+
     ##############
     # Run the simulator
     # Flags:
     #   tolerance  - epsilon tolerance before beginning testing, default is 0.05 
     #   n_test     - discrete number of testing trials to perform, default is 0
-    sim.run()
+    sim.run(n_test=20, tolerance=0.0001) # 'n_test' - Set this to '10' to perform 10 testing trials
 
 
 if __name__ == '__main__':
