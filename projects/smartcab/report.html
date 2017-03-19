@@ -1548,11 +1548,9 @@ The inputs I am using are the next waypoint (which direction should I turn in or
 <div style="background-color:#fff1e0;">
 **Answer:**
 <br><br>
-When I began this project, I argued that all available features are critical for the driving agent to learn both safety and efficiency. In order for the agent to stay crash free, it needs to understand how to behave when it approaches a traffic light. If it's red, stop. If it's red, stop... unless there are no approaching vehicles in which case you can make a right hand turn. If it's green, go... unless you are turning left and there is an oncoming vehicle. We need these inputs (and a resulting reward when action taken is positive) in order to learn the safest course of action.
+Effectively, there are 4 features -- waypoint, input light, input left, and input oncoming. Each of these features has a different number of possible states. Waypoint has 3 options... forward, left, and right. Input-light has 2 options... red and green (envoronment.py reveals only two choices here... there is no yellow light in the world). Input-left has 4 options... the vehicle to your left can move left, right, or forward. The final combination is that there is no car to your left. Input-oncoming has 4 options... the oncoming vehicle can move left, right, or forward. The final combination is that there is no oncoming car.
 <br><br>
-However, at this point in time I've reduced the necessary inputs. It turns out that the processing power of my brain is much more adequate than that of my computer. It's easy for me to use all available inputs when arriving at a stoplight.. but in order for our algorithm to learn efficiently (within a reasonable amount of time) there are some inputs it doesn't need and will still achieve optimal performance. 
-<br><br>
-The inputs I am using are the next waypoint (which direction should I turn in order to stay on track toward the destination), the state of the traffic light (red or green), and the decision being made by the oncoming vehicle and vehicle to the left. If the driving agent is following the path, it won't need to be concerned with deadline. More interestingly is why we can ignore the decision of the vehicle to the right. In the US, at least, factors other than the decision of the vehicle to your right will dictate first what the proper decision is for the smartcab. If the light is red.. you stop - if the vehicle to your right was going straight you'd also stop. If you are making a right hand turn at a green light the vehicle to your right could be going right, straight, or left and it wouldn't matter to you. Hence, I leave out what I originally thought was a critical input in training the algorithm.
+When our smartcab approaches an intersection in this environment it could be confronted with (3*2*4*4)=96 different possible states.
 </div>
 </div>
 </div>
@@ -4437,7 +4435,15 @@ Third Policy:<br>
  -- right : 0.00<br>
  -- None : 24.77<br>
  -- left : -9.05<br>
-Ok. We now need to go left but the traffic light is red. No question here that the optimal policy is to stay put. Regardless of what the vehicles to our left and oncoming direction intend to do, we don't want to blow this red light in any situation. Luckily, the optimal policy that's been determined is None... which tells us to stay where we are. 
+Ok. We now need to go left but the traffic light is red. No question here that the optimal policy is to stay put. Regardless of what the vehicles to our left and oncoming direction intend to do, we don't want to blow this red light in any situation. Luckily, the optimal policy that's been determined is None... which tells us to stay where we are.
+<br><br>
+The Incorrect Policy?:<br>
+('left', 'green', 'left', 'forward')<br>
+ -- forward : 0.00<br>
+ -- right : 10.05<br>
+ -- None : -3.45<br>
+ -- left : -14.21<br>
+In this set of inputs, I want to turn left at a green light. The car to my left intends to turn left, but they have a red light so they should not dissude us from making our left hand turn. There is an oncoming car that intends to move forward. They have the right of way so this should deter us from making the left hand turn. SO, the correct course of action here is to do nothing until the oncoming car has passed. However, the policy determined by the algorithm is to turn right. Although this may help prevent an accident, it puts the vehicle going in the opposite direction we intended to go. At least making the left hand turn -- which would cause an accident -- has the lowest q-value of the options.  
 </div>
 </div>
 </div>
