@@ -59,8 +59,8 @@ The algorithm under development will include 2 user inputs. A starting location 
 3. If total mileage > 1/2 target mileage, move to the next node with the shortest distance from the end location,
 else -- depending upon exploratory status -- either move to a random location or exploit current information in your q-table.
 4. Increment mileage and update q-table (q-values must depend on current and future reward). Starting update function: Q(s,a) = R(s,a) + gamma * max(Q(nextstate,allactions))
-
-5. Repeat step 3 & 4 until agent has reached end location. If mileage within 1/4 mile of target mileage, replace existing q-table with temp q-table. Note: if the run comes up too short or too long, the information we learned during that run could be couterproductive. 
+5. Initial reward system. +2 if tag "highway" equals "footway" or "path". +2 if tag "tourism" equals "viewpoint". +2 if tag "historic" exists on that way. +2 if tag "natural" equals "water". 
+5. Repeat step 3 & 4 until agent has reached end location. If mileage within acceptable range (+/- one-querter mile of target range), replace existing q-table with temp q-table. Note: if the run comes up too short or too long, the information we learned during that run could be couterproductive. 
 6. Repeat steps 1-5 until algorithm converges. 
 
 Ultimately, you'll have an enourmous q-table with q-values for each possible move that will still loop you from the same location and route your run through the best places the area has to offer (+trails, +views, +history). This entirely answer the question, if I'm at location X on this 5 mile run, which direction should I go next in order to maximize utility? We'll be able to look at the optimal policy the algrithm determines, look at the path and its contents on a map, and determine if the algorithm has learned what we would consider the best policy. 
