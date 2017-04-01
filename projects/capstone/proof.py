@@ -1,7 +1,9 @@
 import random
 
+# create q-table to store state-policy pairs
 Q = {}
 
+# create matrix of distances between nodes
 distance = {'(A,B)':0.25,'(B,C)':0.25,'(C,D)':0.25,'(D,E)':0.25,
 		    '(F,G)':0.25,'(G,H)':0.25,'(H,I)':0.25,'(I,J)':0.25,
 		    '(K,L)':0.25,'(L,M)':0.25,'(M,N)':0.25,'(N,O)':0.25,
@@ -23,6 +25,7 @@ distance = {'(A,B)':0.25,'(B,C)':0.25,'(C,D)':0.25,'(D,E)':0.25,
 		    '(I,D)':0.25,'(N,I)':0.25,'(S,N)':0.25,'(X,S)':0.25,
 		    '(J,E)':0.25,'(O,J)':0.25,'(T,O)':0.25,'(Y,T)':0.25}
 
+# create matrix of rewards for actions between nodes
 rewards =  {'(A,B)':0.0,'(B,C)':0.0,'(C,D)':0.0,'(D,E)':0.0,
 		    '(F,G)':0.0,'(G,H)':0.0,'(H,I)':0.0,'(I,J)':0.0,
 		    '(K,L)':0.0,'(L,M)':0.0,'(M,N)':0.0,'(N,O)':0.0,
@@ -44,6 +47,7 @@ rewards =  {'(A,B)':0.0,'(B,C)':0.0,'(C,D)':0.0,'(D,E)':0.0,
 		    '(I,D)':0.0,'(N,I)':0.0,'(S,N)':0.0,'(X,S)':0.0,
 		    '(J,E)':0.0,'(O,J)':5.0,'(T,O)':0.0,'(Y,T)':0.0}
 
+# create matrix of distance from every node to the start/end location
 fromstart = {'A':1.00,'B':0.75,'C':0.50,'D':0.25,
 		     'E':0.50,'F':0.75,'G':0.50,'H':0.25,
 		     'I':0.00,'J':0.25,'K':1.00,'L':0.75,
@@ -52,14 +56,36 @@ fromstart = {'A':1.00,'B':0.75,'C':0.50,'D':0.25,
 		     'U':1.50,'V':1.25,'W':1.00,'X':0.75,
 		     'Y':1.00}
 
-# define parameters
+# for reference, this is the grid of nodes layout
+# A F K P U
+# B G L Q V
+# C H M R W
+# D I N S X
+# E J O T Y
+
+# Note to self
+# For a 2 mile run, I beleive the optimal path is
+# ['I','J','O','T','S','R','M','H','I']
+
+# define tuning parameters
 gamma = 0.7
-alpha = 0.9
-epsilon = 0.6
+alpha = 1.0
+epsilon = 0.7
+dfactor_low = 0.33
+dfactor_high = 0.66
 
 # set number of trials
-n_trials = 1000
+n_trials = 5000
 
+# use count to collect number of instances mileage = target mileage
+count = 0
+
+# simulation
+# each run will use an initial random move followed by a series of
+# decisions between split points. Starting location is I. The 
+# while loop will run until current location (after the initial 
+# move) is equal to the start location. Use lots of print statements
+# to understand what's going on.
 for i in range(n_trials):
 
 	# define start location
@@ -79,13 +105,13 @@ for i in range(n_trials):
 	# reason: if mileage != target mileage new knowledge is counter productive
 	qtemp = Q.copy()
 
-	# make initial random move
+	# make initial random move - update previous and current location
 	initial_move = random.choice([ k for k,v in distance.items() if '('+start_location in k ])
 	previous_location = initial_move[1]
 	current_location = initial_move[3]
 
 	# create state if doesn't exist
-	state = initial_move + ' ' + str(False)
+	state = initial_move + ' ' + str('low')
 	if state not in qtemp.keys():
 		qtemp[state] = 0.0
 
@@ -95,30 +121,17 @@ for i in range(n_trials):
 	print 'The next moves from action movement are'
 	print next_moves
 
-	# create state if doesnt exist
+	# create 'next' states if they do not exist in q-table
 	for move in next_moves:
-		fstate = move + ' ' + str(False)
+		fstate = move + ' ' + str('low')
 		if fstate not in qtemp.keys():
 			qtemp[fstate] = 0.0
 
 	# get max q-value in next moves
-	maxQ_next = [v for k,v in qtemp.iteritems() if v == max(qtemp.values()) and k[:5] in next_moves]
+	maxQ_next = dict((k,v) for k,v in qtemp.iteritems() if k[:5] in next_moves)
+	maxQ_next = [v for k,v in maxQ_next.iteritems() if v == max(maxQ_next.values())][0]
 	print 'Initial max q value is: '
 	print maxQ_next
-	if len(maxQ_next) == 0:
-		print 'no max qs found'
-		maxQ_next = 0
-		print 'Revised max q value is: '
-		print maxQ_next
-	elif len(maxQ_next) > 1:
-		print 'more than 1 max q found'
-		maxQ_next = random.choice(maxQ_next)
-		print 'Revised max q value is: '
-		print maxQ_next
-	else:
-		maxQ_next = maxQ_next[0]
-		print 'One max q value found: '
-		print maxQ_next	
 
 	# update q-table on initial move
 	qtemp[state] = qtemp[state] + alpha * (rewards[initial_move] + gamma * maxQ_next - qtemp[state])
@@ -126,8 +139,6 @@ for i in range(n_trials):
 	# increment mileage
 	mileage += distance[initial_move]
 	print 'Total miles after initial movement are: ' + str(mileage)
-
-	print 'Initial move from ' + str(start_location) + ' to ' + str(current_location)
 
 	while start_location != current_location:
 
@@ -139,8 +150,14 @@ for i in range(n_trials):
 		print valid_moves
 
 		# determine state of duration and closest / furthest valid moves from origin
-		duration = mileage > 0.49 * target_mileage
-		print 'Mileage is in high zone: ' + str(mileage > 0.49 * target_mileage)
+		if mileage < dfactor_low * target_mileage:
+			duration = 'low'
+		elif mileage > dfactor_high * target_mileage:
+			duration = 'high'
+		else:
+			duration = 'medium'
+		print 'Duration = ' + str(duration)
+
 		points = [i[3] for i in valid_moves]
 		holdme = {}
 
@@ -161,27 +178,12 @@ for i in range(n_trials):
 		# select next move
 		rvalue = random.random()
 
-		print 'The rvalue is ' + str(rvalue)
-
 		if rvalue < epsilon:
 			print 'Exploiting...'
-			action = [k for k,v in qtemp.iteritems() if v == max(qtemp.values()) and k[:5] in valid_moves]
+			action = dict((k,v) for k,v in qtemp.iteritems() if k[:5] in valid_moves)
+			action = [k for k,v in action.iteritems() if v == max(action.values())][0][:5]
 			print 'ACTION!!!!!!! is: '
 			print action
-			if len(action) == 0:
-				action = random.choice(valid_moves)
-				print 'Found no q values'
-				print 'Action to be taken is: '
-				print action
-			elif len(action) > 1:
-				action = random.choice(action)
-				action = action[:5]
-				print 'Found multple max q values'
-				print 'Action to be taken is: '
-				print action[:5]
-			else:
-				action = action[0][:5]
-
 		else:
 			action = random.choice(valid_moves)
 			print 'Epsilon > rvalue.. exploring. Taking random action'
@@ -197,46 +199,32 @@ for i in range(n_trials):
 		print 'The next moves from action movement are'
 		print next_moves
 
-		# create state if doesnt exist
+		# create 'next' states if they do not exist in q-table
 		for move in next_moves:
 			fstate = move + ' ' + str(duration)
 			if fstate not in qtemp.keys():
 				qtemp[fstate] = 0.0
 
 		# get max q-value in next moves
-		maxQ_next = [v for k,v in qtemp.iteritems() if v == max(qtemp.values()) and k[:5] in next_moves]
+		# maxQ_next = [v for k,v in qtemp.iteritems() if v == max(qtemp.values()) and k[:5] in next_moves]
+		maxQ_next = dict((k,v) for k,v in qtemp.iteritems() if k[:5] in next_moves)
+		maxQ_next = [v for k,v in maxQ_next.iteritems() if v == max(maxQ_next.values())][0]
 		print 'Initial max q value is: '
 		print maxQ_next
-		if len(maxQ_next) == 0:
-			print 'no max qs found'
-			maxQ_next = 0
-			print 'Revised max q value is: '
-			print maxQ_next
-		elif len(maxQ_next) > 1:
-			print 'more than 1 max q found'
-			maxQ_next = random.choice(maxQ_next)
-			print 'Revised max q value is: '
-			print maxQ_next
-		else:
-			maxQ_next = maxQ_next[0]
-			print 'One max q value found: '
-			print maxQ_next
 
 		# adjust reward structure based on state of distance from start location
-		if duration is True:
-			if action[3] == closest_point:
-				temp_reward = rewards[action] + 4
-			elif action[3] == furthest_point:
-				temp_reward = rewards[action] - 4
+		if duration == 'low':
+			if action[3] == furthest_point:
+				temp_reward = rewards[action] + 200
 			else:
-				temp_reward = rewards[action] 
+				temp_reward = rewards[action]
+		elif duration == 'high':
+			if action[3] == closest_point:
+				temp_reward = rewards[action] + 200
+			else:
+				temp_reward = rewards[action]
 		else:
-			if action[3] == closest_point:
-				temp_reward = rewards[action] - 4
-			elif action[3] == furthest_point:
-				temp_reward = rewards[action] + 4
-			else:
-				temp_reward = rewards[action] 
+			temp_reward = rewards[action]
 
 		# update q-table
 		qtemp[state] = qtemp[state] + alpha * (temp_reward + gamma * maxQ_next - qtemp[state])
@@ -251,37 +239,45 @@ for i in range(n_trials):
 		print 'Previous state now: ' + str(previous_location)
 		print 'Current location now: ' + str(current_location)
 
-	if mileage >= target_mileage - 0.25 or mileage <= target_mileage + 0.25:
+	if mileage >= target_mileage - 0.26 and mileage <= target_mileage + 0.26:
 		print "WITHIN TRGET RANGE!!!, WITHIN TRGET RANGE!!!, WITHIN TRGET RANGE!!!, WITHIN TRGET RANGE!!!, "
 		Q = qtemp.copy()
+		count += 1
 
+	Q = qtemp.copy()
+
+print 'Count = '
+print count
 print 'Resulting Q-table: '
 print Q
-'''
-# next step
-# state doesn't incorporate previous state
-# when action is to go to previous state you should receive a negative reward
-# in doing this, it would mean optimal policy never retraces it's steps... I think
 
-test = {'(B,C) False': 0.0, '(S,N) False': 0.0, '(I,D) False': 0.0, '(N,M) True': -0.36396396363995986, '(Q,P) False': 0.0, '(X,S) False': 0.0, '(B,G) True': 3.9999603600036, '(L,M) False': 0.0, '(I,N) False': 0.0, '(R,Q) False': 0.0, '(O,J) False': 0.9999, '(J,O) False': 5.360360000000001, '(C,D) True': 0.036000000360003614, '(C,B) True': -3.999999999999996, '(M,H) True': 3.999999999999996, '(D,C) False': -3.207999279207276, '(Y,X) False': 0.0, '(G,L) False': 0.0, '(C,D) False': -3.996, '(X,S) True': 4.007371097400249, '(S,N) True': 4.0, '(L,K) False': 0.0, '(K,P) False': 0.0, '(L,Q) False': 3.96, '(C,B) False': 3.9999999996, '(L,G) False': 0.9, '(V,R) False': 0.0, '(Q,L) True': 3.6003603996360365, '(W,X) False': 0.0, '(O,N) True': 0.03636000003600032, '(S,X) True': 3.465535092345954, '(G,B) True': -3.999279927928, '(W,X) True': 4.000000000006988, '(I,D) True': 0.0, '(M,R) False': 3.9996, '(G,F) False': 0.0, '(O,T) True': -4.0, '(J,O) True': 0.999999999, '(M,L) False': 0.0, '(A,F) False': 0.0, '(I,J) True': 0.0, '(G,B) False': -3.996, '(X,W) True': -3.639996003996, '(W,V) True': 4.0, '(O,J) True': 9.0, '(R,V) True': -4.0, '(H,I) True': 3.999999999999996, '(M,N) False': 0.0, '(Q,L) False': 0.0, '(O,N) False': -3.9999995999999998, '(Q,R) True': 4.0, '(M,H) False': -3.96, '(V,U) False': 0.0, '(R,S) False': 0.99, '(K,F) False': 0.0, '(G,H) True': 4.0, '(B,A) True': -4.0, '(Y,T) True': 11.368860937099129, '(F,A) True': -3.2727272799992737, '(F,G) True': 4.0, '(L,G) True': 8.996000000000004, '(T,Y) True': -3.9927358744971064, '(X,Y) False': 5.017057587720082, '(R,S) True': 16.79240276086624, '(I,N) True': 0.0, '(F,G) False': 0.0, '(O,T) False': 4.0001156974474075, '(K,L) True': 4.0, '(V,Q) False': 0.0, '(X,Y) True': 4.773575723908475, '(V,U) True': -4.0, '(N,I) True': 4.0, '(H,G) False': 0.0, '(J,I) False': -3.99999996, '(Q,V) True': -0.003600360036360002, '(Q,P) True': -4.0, '(H,M) True': -0.003960000039639637, '(I,H) False': 0.0, '(K,P) True': -4.0, '(Q,V) False': 0.0, '(H,C) True': -3.99999999999996, '(P,U) True': 1.0, '(E,J) False': -3.999999999996, '(N,S) False': 4.512402767423625, '(N,I) False': -3.996, '(A,B) False': 0.0, '(D,I) True': 4.0, '(T,S) False': 0.999999, '(V,W) True': 6.991053515178095e-11, '(S,R) True': 1.396399649717388, '(U,P) True': 9.0, '(Y,X) True': 4.747462612259178, '(X,W) False': 0.0, '(P,Q) True': 4.0, '(A,B) True': 4.0, '(F,K) True': -0.3963636003996034, '(E,D) True': 4.000000005833589, '(S,T) True': 12.368893270195597, '(W,V) False': 0.0, '(T,O) True': 3.636396036003636, '(H,G) True': 0.0, '(I,H) True': 0.0, '(Y,T) False': 0.0, '(R,M) False': 0.0, '(E,D) False': -3.99999999999996, '(J,I) True': 3.99999999999996, '(S,X) False': -3.96, '(R,V) False': 3.996, '(N,O) False': 1.0853570699999966e-08, '(D,C) True': -3.99996, '(N,M) False': 0.0, '(D,I) False': -3.99999996, '(A,F) True': 4.0, '(S,T) False': 4.9995, '(F,A) False': -3.96, '(H,C) False': -3.9999999996, '(N,S) True': -3.999999999999994, '(P,K) True': 3.6000000036399635, '(J,E) True': -3.999999937214935, '(H,I) False': -3.9996, '(B,A) False': 3.9999995999999998, '(H,M) False': 0.00035999999999999964, '(V,R) True': 4.0, '(E,J) True': 4.000000000000923, '(Q,R) False': 0.0, '(K,F) True': 0.3603600036039598, '(V,Q) True': 0.39603632007920764, '(C,H) False': -3.999996, '(L,Q) True': -4.0, '(M,R) True': -3.9990279007813783, '(M,N) True': 0.0036003600003636296, '(T,Y) False': 4.7695592467835475, '(G,H) False': 0.0, '(V,W) False': 0.0, '(C,H) True': 3.99999999999996, '(L,M) True': 4.0, '(T,O) False': -3.6, '(U,V) True': 4.0, '(B,C) True': 4.0, '(T,S) True': 9.00093646741917, '(D,E) True': -3.999999999916258, '(G,F) True': 0.0, '(G,L) True': 4.639963639963959, '(L,K) True': -3.636363963960396, '(D,E) False': 0.03600071211277561, '(R,Q) True': -3.636396003960364, '(B,G) False': -3.999996, '(J,E) False': -3.999999993114128, '(F,K) False': 0.0, '(K,L) False': 0.0, '(S,R) False': 4.99995, '(M,L) True': -0.0003996363600363602, '(R,M) True': 3.6363960036000003, '(I,J) False': 9.015079113539532e-20, '(N,O) True': 1.085357069999992e-17}
-I - J... 0.25
-J - O... 0.50
-O - T... 0.75
-T - Y... 1.00
-Y - X... 1.25
-X - S... 1.50
-S - T... 1.75
-T - O... 2.00
-O - J... 2.25
-J - I... 2.50
+def tester(policy_dict):
+	
+	start_loc = 'I'
+	mileage = 0
+	target_mileage = 2
+	duration = 'low'
+	path = ['I']
+	current_loc = 'I'
+	counter = 0
 
-test2 = {'(B,C) False': -3.9999999999999996, '(U,P) True': 9.0, '(N,M) True': -3.9603996039999996, '(R,S) True': 9.0, '(X,S) False': 0.0, '(S,N) False': 0.0, '(L,M) False': -3.9999999996, '(D,C) True': -4.0, '(L,G) True': 5.367543825451849, '(O,J) False': 1.0000000000000007, '(Y,T) True': 4.0, '(C,D) True': 0.39960396036395984, '(C,B) True': -4.0, '(K,L) False': 0.0, '(M,H) True': 4.0, '(D,C) False': -3.9279200792720728, '(Y,X) False': 0.0, '(G,L) False': 5.691016583528285, '(C,D) False': -4.0, '(X,S) True': 4.0, '(S,N) True': 4.0, '(L,K) False': 0.0, '(K,P) False': 0.0, '(L,Q) False': 10.968517198861669, '(C,B) False': 4.0, '(L,G) False': 1.0007546938496452, '(V,R) False': 0.0, '(Q,L) True': 11.277885364693502, '(W,X) False': 0.0, '(O,N) True': 3.96000360039996, '(S,X) True': -3.999992799999928, '(G,B) True': -4.0, '(W,X) True': 4.0, '(I,D) True': 0.0, '(M,R) False': 4.00000005670567, '(G,F) False': 0.0, '(O,T) True': -4.0, '(J,O) True': 1.0000000000000075, '(M,L) False': 0.0, '(A,F) False': 0.0, '(I,J) True': 0.0, '(S,T) True': 5.0, '(X,W) True': -3.96036036360396, '(Y,X) True': 4.0, '(O,J) True': 9.000000000000002, '(R,V) True': -4.0, '(H,I) True': 4.0, '(M,N) False': -3.999999999299363, '(Q,P) False': 0.0, '(B,G) True': 3.6438678246724305, '(O,N) False': -4.0, '(Q,R) True': 4.0, '(M,H) False': -4.0, '(V,U) False': 0.0, '(R,S) False': 1.0, '(K,F) False': 0.0, '(G,H) True': 4.0, '(B,A) True': -4.0, '(J,O) False': 5.360000000000168, '(F,A) True': -3.9200792072792003, '(F,G) True': 4.000000000000001, '(R,Q) False': 0.0, '(T,Y) True': -4.0, '(X,Y) False': -3.9999999999917373, '(I,N) True': 0.0, '(F,G) False': 0.0, '(O,T) False': 4.0, '(V,Q) False': 0.0, '(X,Y) True': 3.920007999200008, '(V,U) True': -4.0, '(N,I) True': 4.0, '(H,G) False': 0.0, '(J,I) False': -4.0, '(Q,V) True': -3.999996360396, '(Q,P) True': -3.999999999201762, '(H,M) True': -0.3600360003995937, '(B,C) True': 4.0, '(K,P) True': -4.0, '(S,T) False': 5.0, '(H,C) True': -4.0, '(P,U) True': 1.0, '(G,B) False': -4.0, '(E,J) False': -3.9999999941623976, '(N,S) False': -3.279999992079999, '(N,I) False': -4.0, '(A,B) False': 0.0, '(F,K) False': 0.0, '(T,S) False': 1.0, '(V,W) True': 7.062026592236372e-48, '(W,V) True': 4.0, '(X,W) False': 0.0, '(P,Q) True': 4.0, '(A,B) True': 4.0, '(F,K) True': 6.919278287471245, '(E,D) True': 4.0, '(W,V) False': 0.0, '(T,O) True': 0.3963996360363997, '(H,G) True': 0.750386078746784, '(I,H) True': 0.0, '(Y,T) False': 0.0, '(K,L) True': 4.6989261738701895, '(N,O) True': 1.3278047757047202e-22, '(J,I) True': 4.0, '(S,X) False': -4.0, '(R,V) False': 4.000000000919569, '(S,R) True': 1.3999963963999638, '(I,N) False': 1.0379066734186704e-34, '(N,M) False': 7.757372014409638e-31, '(D,I) False': -4.0, '(A,F) True': 4.0, '(I,D) False': 6.644489384305004e-24, '(F,A) False': -3.9273541598174084, '(H,C) False': -3.999999999999928, '(N,S) True': -4.0, '(P,K) True': 10.922842320995114, '(J,E) True': -3.9999999999379607, '(H,I) False': -4.0, '(B,A) False': 4.0, '(Q,L) False': 0.0, '(H,M) False': 3.603600360039951e-08, '(V,R) True': 4.0, '(E,J) True': 4.0, '(Q,R) False': 0.0, '(K,F) True': 3.9603600008244793, '(V,Q) True': -0.039636399995640004, '(C,H) False': -4.0, '(L,Q) True': 3.105067779756906, '(M,R) True': -4.0, '(M,N) True': 3.96000000363599e-06, '(T,Y) False': 4.000000000000682, '(G,H) False': 0.0, '(V,W) False': 0.0, '(N,O) False': 1.4977008274439823e-15, '(C,H) True': 4.0, '(L,M) True': 4.0, '(T,O) False': -3.9998909530718216, '(U,V) True': 4.0, '(I,H) False': 6.492118633856549e-79, '(T,S) True': 9.0, '(D,E) True': -4.0, '(G,F) True': 7.845157686584239e-12, '(G,L) True': 1.406910890019724, '(L,K) True': 6.52327789294011, '(D,E) False': 0.36000396039601057, '(R,Q) True': -0.3603636000360364, '(B,G) False': -4.0, '(J,E) False': -3.927992728, '(D,I) True': 4.0, '(R,M) False': -3.99996, '(Q,V) False': 0.0, '(S,R) False': 5.0, '(M,L) True': -3.9996349572814225, '(R,M) True': 0.0036039960036359925, '(I,J) False': 1.3731558107045719e-30, '(E,D) False': -4.0}
-I - D... 0.25
-D - E... 0.50
-E - J... 0.75
-J - O... 1.00
-O - N... 1.25
-N - I... 1.50
-'''
+	while path.count('I') < 2 and counter < 50: 
+		
+		moves = dict((k,v) for k,v in policy_dict.iteritems() if k.startswith('('+current_loc) and str(duration) in k)
+		next_move = [k[3] for k,v in moves.iteritems() if v == max(moves.values())][0]
 
-test3 = {'(B,C) False': -3.99999999999996, '(M,H) True': 4.0, '(N,M) True': -3.603603603960004, '(R,S) True': 9.0, '(B,A) True': -4.0, '(B,G) True': 0.03639600396003956, '(L,M) False': -3.9999999999894, '(I,N) False': 7.185671458969079e-16, '(L,G) True': 8.636000000399637, '(O,J) False': 1.0, '(Y,T) True': 4.0, '(C,D) True': 3.600360039636036, '(C,B) True': -4.0, '(K,L) False': 0.0, '(U,P) True': 9.00000000000008, '(D,C) False': -3.279927279927992, '(Y,X) False': 0.0, '(G,L) False': 5.0, '(C,D) False': -4.0, '(X,S) True': 4.0, '(S,N) True': 4.0, '(L,K) False': 0.0, '(K,P) False': 0.0, '(L,Q) False': 4.000000000612782, '(C,B) False': 4.0, '(L,G) False': 1.0, '(V,R) False': 0.0, '(Q,L) True': 3.6000000360036024e-06, '(W,X) False': 0.0, '(O,N) True': 3.999639600360425, '(S,X) True': -3.9999999272799927, '(G,B) True': -3.9279927999208, '(W,X) True': 4.000000000000007, '(I,D) True': 0.0, '(M,R) False': 4.0, '(G,F) False': 0.0, '(O,T) True': -4.0, '(J,O) True': 1.0057160552046185, '(Q,P) False': 0.0, '(A,F) False': 0.0, '(I,J) True': 0.0, '(G,B) False': -3.9999999931123122, '(X,W) True': -3.6003999639963635, '(Y,X) True': 4.0, '(O,J) True': 9.0, '(R,V) True': -4.0, '(H,I) True': 4.0, '(M,N) False': -4.0, '(S,N) False': 0.0, '(O,N) False': -4.0, '(Q,R) True': 4.000000000009994, '(M,H) False': -4.0, '(R,S) False': 1.0000000000000955, '(K,F) False': 0.0, '(G,H) True': 4.0, '(X,S) False': 0.0, '(J,O) False': 5.0003639996003635, '(F,A) True': 3.920000007927272, '(F,G) True': 4.0, '(R,Q) False': 0.0, '(M,L) False': 6.444332502299715e-26, '(T,Y) True': -4.0, '(X,Y) False': -3.939078636440821, '(I,N) True': 0.0, '(F,G) False': 0.0, '(O,T) False': 4.000000000641919, '(V,Q) False': 0.0, '(X,Y) True': 3.9207920720072797, '(V,U) True': 2.3000000000070573, '(N,I) True': 4.0, '(H,G) False': 9.410381582166006e-99, '(J,I) False': -3.9999999999310414, '(K,L) True': 4.0, '(Q,P) True': -4.0, '(T,Y) False': 4.000006189192307, '(I,H) False': 0.0, '(K,P) True': -4.0, '(Q,V) False': 0.0, '(H,C) True': -4.0, '(P,U) True': 7.300000000072953, '(E,J) False': -4.0, '(N,S) False': -3.927999992727266, '(Q,V) True': -0.039603963636039574, '(N,I) False': -4.0, '(A,B) False': 0.0, '(D,I) True': 4.0, '(T,S) False': 1.0, '(V,W) True': 6.726486731007529e-14, '(W,V) True': 4.0, '(X,W) False': 6.287919248380977e-06, '(P,Q) True': 4.000000000000001, '(V,U) False': 0.0, '(F,K) True': -3.6000000003996036, '(E,D) True': 4.0, '(W,V) False': 0.0, '(T,O) True': 0.003960003600453552, '(H,G) True': 0.0, '(I,H) True': 0.0, '(Y,T) False': 0.0, '(S,T) True': 5.0, '(N,O) True': 6.140827566646464e-13, '(J,I) True': 4.0, '(S,X) False': -4.0, '(R,V) False': 4.0, '(S,R) True': 1.3999603960364735, '(D,C) True': -4.0, '(N,M) False': 6.131323280167895e-78, '(K,F) True': 3.6000399600039605, '(A,F) True': 4.0, '(I,D) False': 0.0, '(F,A) False': -3.9999999999999996, '(H,C) False': -4.0, '(N,S) True': -4.0, '(P,K) True': 3.963639603603964, '(J,E) True': -4.0, '(H,I) False': -3.999993104147017, '(B,A) False': 4.0, '(Q,L) False': 0.0, '(H,M) False': 0.0036000360036035975, '(V,R) True': 4.0, '(E,J) True': 4.000000000000805, '(Q,R) False': 0.0, '(D,I) False': -4.0, '(V,Q) True': 3.2360720036007207, '(C,H) False': -4.0, '(L,Q) True': -4.0, '(M,R) True': -4.0, '(U,V) True': 4.0, '(H,M) True': -3.639603636036, '(G,H) False': 0.0, '(V,W) False': 0.0, '(N,O) False': 6.093627431589812e-38, '(C,H) True': 4.0, '(L,M) True': 4.0, '(T,O) False': -3.999937629999999, '(M,N) True': 3.6036000000036, '(B,C) True': 4.0, '(T,S) True': 9.0, '(D,E) True': -3.999999999924013, '(G,F) True': 0.0, '(G,L) True': 4.9963963999999965, '(L,K) True': -0.003996396363600364, '(D,E) False': 3.600000000795114, '(R,Q) True': -0.03636399600000034, '(B,G) False': -4.0, '(J,E) False': 3.200000000007592, '(F,K) False': 0.0, '(R,M) False': -3.999999996, '(S,T) False': 5.000006380527292, '(S,R) False': 5.0, '(A,B) True': 4.0, '(M,L) True': -3.9600036360360003, '(R,M) True': 0.0036003603960000005, '(I,J) False': 1.003961288490696e-20, '(E,D) False': -4.0}
+		path.append(next_move)
+		mileage += 0.25
+		if mileage < dfactor_low * target_mileage:
+			duration = 'low'
+		elif mileage > dfactor_high * target_mileage:
+			duration = 'high'
+		else:
+			duration = 'medium'
+		current_loc = next_move
+		counter += 1
+		print path
+
+	return path
+
+tester(Q)
