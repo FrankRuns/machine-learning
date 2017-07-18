@@ -88,7 +88,7 @@ factor = 0.5
 target_mileage = 8
 
 # set number of trials
-n_trials = 5000
+n_trials = 500
 count = 0
 
 # add next_move state to q-table

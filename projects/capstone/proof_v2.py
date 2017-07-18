@@ -29,16 +29,6 @@ docker run -t -i -p 5000:5000 -v $(pwd):/data osrm/osrm-backend osrm-routed /dat
 
 # start_location = '-71.0721040,42.4436421'
 
-
-
-
-
-
-
-
-
-
-
 # nodes = []
 # for node in root.findall('node'):
 # 	nodes.append(node.get('id'))
@@ -68,78 +58,51 @@ docker run -t -i -p 5000:5000 -v $(pwd):/data osrm/osrm-backend osrm-routed /dat
 # 			else:
 # 				relationships[node+'_'+next_node] = 'no_relevant_tags'
 
-# create a function that gives lat lon coordinates
-# input = node id, returns lat lon tuple
-# def get_coords(node_id):
-# 	for el in root.findall(".//node[@id='"+node_id+"']"):
-# 		return el.get('lat'), el.get('lon')
-
-
-
-
-
-# build it
-
-# 1. define several start parameters:
-#	 start location, previous location = None, empty list for places you've been
-# 	 start mileage = 0 and duration = low
-# 2. create a temp copy of the master Q table - replace only if mileage within 'range'
-# 3. determine valid moves from initial location and store to list
-# 4. determine distance from start location to each valid move - this will allow algorithm to learn how to loop
-# 5. generate random value to determine explore / exploit decision
-# 6. if exploring, choose random move from valid moves list
-# 7. if exploiting, choose move from valid moves list (A) where the next move (B) from 
-#	 from move B has the highest q value
-# 8. reward based on A) tag associated with that path and B) duration trade-off which 
-# 	 means furthest point chosen when duration is low receives high reward
-# 9. if furthest point from origin is chose in low duration state, increase reward. if
-# 	 if agent returns to node it came from, decrement reward 
-# 7. update temp q table with new q-value for that action (action == initial move)
-# 8. increment mileage of run. 
-
-
-
-
-
-# given a single node, how long will it take to
-# A. find possible nodes from that node and
-# B. the distance between each next node and the origin point and
-# B. the distance between that node and each next node
-
-# start_node = '66566291'
-# start_location = '-71.0721040,42.4436421'
-
 import random
 import requests
 import json
 import xml.etree.cElementTree as ET 
+import time
+import pickle
+import os.path
+import math
+
+'''
+filter osm to only streets / paths
+put file in same directory as osmfilter tool and
+use ./osmfilter <filename> --keep="highway" >streets_only.osm.
+For example, if your file is called the_map.osm you put
+this in the command line
+./osmfilter the_map.osm --keep="highway" >streets_only.osm
+
+below you'll need to be in the same directory where streets.osm
+is located
+'''
+
+
 
 # Define file name
-filename = 'map'
+filename = 'streets.osm'
 # filename = 'massachusetts-latest.osm.pbf'
+
 
 tree = ET.parse(filename)
 root = tree.getroot()
 
-debug = True
 
 def get_geocoords(nodeid):
-	'''
-	parses osm file and returns lat lon coords
-	example input = '66566291'
-	example output = '-71.0727793,42.4436791'
-	'''
+	''' parses osm file and returns lat lon coords
+		example input = '66566291'
+		example output = '-71.0727793,42.4436791' '''
 
 	for node in root.findall(".//node[@id='"+nodeid+"']"):
 		return node.get('lon') + ',' + node.get('lat')
 
 
-def distance_between_nodes(start_coords, end_coords):
-	'''
-	node inputs are stings of longitude / latitude geo coords
-	example node1 = '-71.0727793,42.4436791'
-	example node2 = '-71.0721040,42.4436421'
-	'''
+def route_distance_between_nodes(start_coords, end_coords):
+	''' node inputs are stings of longitude / latitude geo coords
+		example node1 = '-71.0727793,42.4436791'
+		example node2 = '-71.0721040,42.4436421' '''
 
 	# include steps between node (just in case, probably not used)
 	url = 'http://127.0.0.1:5000/route/v1/walking/{};{}?steps=true'.format(start_coords, end_coords)
@@ -154,16 +117,38 @@ def distance_between_nodes(start_coords, end_coords):
 
 	return miles
 
+
+def deg_2_rad(deg):
+	''' Faster than calling routing service 
+	    input = degrees, output = radians '''
+
+	return (deg * math.pi) / 180
+
+
+def crow_distance_between_nodes(start_coords, end_coords):
+	''' node inputs are stings of longitude / latitude geo coords
+		example node1 = '-71.0727793,42.4436791'
+		example node2 = '-71.0721040,42.4436421' '''
+
+	lat1 = float(start_coords.split(',')[1])
+	lat2 = float(end_coords.split(',')[1])
+	lon1 = float(start_coords.split(',')[0])
+	lon2 = float(end_coords.split(',')[0])
+
+	inner = math.cos(deg_2_rad(90-lat1)) * math.cos(deg_2_rad(90-lat2)) + math.sin(deg_2_rad(90-lat1)) * math.sin(deg_2_rad(90-lat2)) * math.cos(deg_2_rad(lon1-lon2))
+
+	return math.acos(inner) * 3958.786
+
 def get_next_nodes(current_node):
-	'''
-	iterates through osm and finds all possible next moves
-	used to produce list of next options from current point
-	'''
+	''' Iterates through osm and finds all possible next moves
+		used to produce list of next options from current point '''
 
 	# list where all next nodes will be stored
 	next_nodes = []
 
 	# iterate through each way in the map file
+	# way must be a road or trail (i.e. you can't run through a building)
+	# in osm data, buildings are also captured as waypoints
 	for way in root.findall('way'):
 		# for each way in map file, iterate thorugh each node on that way
 		for node in way.findall('nd'):
@@ -191,13 +176,11 @@ def get_next_nodes(current_node):
 	return list(set(next_nodes))
 
 def get_reward(node1, node2):
-	'''
-	using 2 nodes, determine reward of moving between them
-	if run on trail, reward + 5
-	if run past natural scene (water), reward + 5
-	if run past historic site, reward + 5
-	http://wiki.openstreetmap.org/wiki/Key:historic
-	'''
+	''' Using 2 nodes, determine reward of moving between them
+		if run on trail, reward + 5
+		if run past natural scene (water), reward + 5
+		if run past historic site, reward + 5
+		http://wiki.openstreetmap.org/wiki/Key:historic '''
 
 	reward = 0
 
@@ -214,29 +197,15 @@ def get_reward(node1, node2):
 			keywords = ['natural', 'waterway', 'bicycle', 'foot', 'checkpoint', 'mountain_pass', 'historic']
 			if any(word in keywords for word in new_tag_list):
 				# TODO: if way has 2 things, double up reward
-				reward += 5
+				# reward += 25
+				reward += 0
 
 	return reward
 
-
-# create fake data and test the shit out of this function
-# Q = {}
-# for i in range(10):
-# 	rvalue = random.random()
-# 	epsilon = 0.6
-# 	moves = random.sample(nodes,3)
-# 	Q = {}
-# 	tmp_states = '{}_{}_{}'.format(random.choice(nodes),random.choice(nodes),'low')
-# 	result = choose_next_node(rvalue, epsilon, moves, Q, tmp_states)
-# 	Q[result] = 0
-# 	print Q
-# 	print result
-
 def choose_next_node(rval, eps, moves, Q, tmp_states):
-	'''
-	determine next node based on explore / exploit decision
-	if exploiting, use Q values to make next choice
-	'''
+	''' Determine next node based on explore / exploit decision
+		if exploiting, use Q values to make next choice '''
+
 	if rval < eps:
 		movement = random.choice(moves)
 	else:
@@ -244,18 +213,15 @@ def choose_next_node(rval, eps, moves, Q, tmp_states):
 	# look at each next move and see which of them are in big Qtable
 	# of the ones that are in it, pick the one with the highest Q value
 		if len(Q) > 0:
-			print 'DANGER ZONE I THINK'
 			found_states = []
 			for el in tmp_states:
 				if el in Q.keys():
 					found_states.append(el)
 			movement = { k: Q[k] for k in found_states }
-			print 'movement first: {}'.format(movement)
 			# TODO: what if all values are 0?
 			movement = { k for k,v in movement.iteritems() if v == max(movement.values()) }
-			print 'movement second: {}'.format(movement)
 			if len(movement) == 1:
-				movement = list(movement)[0].split('_')[1]
+				movement = list(movement)[0].split('_')[2]
 			else:
 				movement = random.choice(moves)
 		else:
@@ -263,192 +229,216 @@ def choose_next_node(rval, eps, moves, Q, tmp_states):
 
 	return movement
 
-# rvalue = 0.8
-# epsilon = 0.6
-# moves = ['66550453', '1915819596', '66566291']
-# tmp_states = ['1915819599_66550453_low', '1915819599_1915819596_low', '1915819599_66566291_low']
-
-# result = choose_next_node(rvalue, epsilon, moves, Q, tmp_states)
-# Q[result] = 0
-# print Q
-# print result
-
-
-# def add_state_to_qtable(state, qtable):
-# 	'''
-# 	create a function to add a state to
-# 	check if state exists and if not, add
-# 	it to the q-table
-# 	'''
-
-# 	# check if state exists in qtable
-# 	state_exists = state in qtable.keys()
-
-# 	# if state does not exist, add it to qtable
-# 	if state_exists == False:
-# 		qtable[state] = 0
-
-# 	# return qtable
-# 	return qtable
-
-
-# # test get_geocoords function
-# for i in range(20):
-# 	test_node = random.choice(nodes)
-# 	test_result = get_geocoords(test_node)
-# 	test_type = type(test_result)
-# 	print '{} and {} and {}'.format(test_node, test_result, test_type)
-
-# # test get next node function
-# for i in range(20):
-# 	test_node = random.choice(nodes)
-# 	test_result = get_next_nodes(test_node)
-# 	test_type = type(test_result)
-# 	print '{} and {} and {}'.format(test_node, test_result, test_type)
-
-
 # start simulation
 
 Q = {}
 
+# https://stackoverflow.com/questions/82831/how-do-i-check-whether-a-file-exists-using-python
+
+if os.path.exists('neighbors.txt'):
+	with open("neighbors.txt", "rb") as f:
+		neighbor_nodes = pickle.load(f)
+else:
+	neighbor_nodes = {}
+
+if os.path.exists('rewards.txt'):
+	with open("rewards.txt", "rb") as f:
+		rewards = pickle.load(f)
+else:
+	rewards = {}
+
+# if os.path.exists('distances.txt'):
+# 	with open("distances.txt", "rb") as f:
+# 		distances = pickle.load(f)
+# else:
+# 	distances = {}
+
+distances = {}
+
+if os.path.exists('listofcoords.txt'):
+	with open("listofcoords.txt", "rb") as f:
+		list_of_coords = pickle.load(f)
+else:
+	list_of_coords = {}
+
+# neighbor_nodes = {}
+# rewards = {}
+# distances = {}
+# list_of_coords = {}
+
 # define paramters
-epsilon = 0.6
-gamma = 0.6
-alpha = 0.7
-factor = 0.5
-target_mileage = 2.0
-n_trials = 20
+# epsilon = 0.6 # hmm. shouldn't this decay?
+gamma = 0.3
+alpha = 1.0 # environment is deterministic
+factor = 0.5 # hmm should this be 0.6 to err on side of longer?
+target_mileage = 1.0
+n_trials = 200
+errors = []
+
+start = time.time()
 
 for trial in range(n_trials):
 
-	print 'NEW RUN'
+	print trial
+	# epsilon = math.cos(0.2*trial)
+	epsilon = 0.7
+	print 'Epsilon: {}'.format(epsilon)
 
-	# define start node, previous node, and empty list to store traveled paths
-	start_location = '66566291' 
-	start_coords = get_geocoords(start_location)
-	current_location = '66566291' # stone place # this is the start node
-	traveled = []
+	''' Define start node, coords for 
+	start location and an empty list to store traveled
+	paths. If start coords not stored, call get_geocoords '''
 
-	# define miles and initial duration
+	start_location = '66572004'
+	if start_location in list_of_coords.keys():
+		start_coords = list_of_coords[start_location]
+	else:
+		start_coords = get_geocoords(start_location)
+		list_of_coords[start_location] = start_coords
+
+	# current_location = '66572004' # stone place is the start node
+
+	''' Define miles, initial duration, and list for
+	visited locations
+	Duration is low if <0.5 through target miles.
+	Duration is high if >=0.5 through target miles '''
+
 	mileage = 0
 	duration = 'low'
+	traveled = []
+	pathed = []
+	option_count_dict = {} # to adjust for dead ends
 
-	# create temporary q-table
+	''' Ignore information when we don't hit target
+	mileage. Use temp Q for each run to do so '''
+
 	tempQ = Q.copy()
 
-	# define possible next nodes
-	next_options = get_next_nodes(current_location)
+	''' From start location, where can we go next? 
+	Save next possible nodes to a list. This is used to 
+	determine where to go next '''
 
-	# add list of possible states
+	if start_location in neighbor_nodes.keys():
+		next_options = neighbor_nodes[start_location]
+	else:
+		next_options = get_next_nodes(start_location)
+		neighbor_nodes[start_location] = next_options
+
+	''' Based on start location, next options, and 
+	current mileage. This is used to determine where to
+	go next '''
+
 	temp_states = []
 	for el in next_options:
-		temp_state = '{}_{}_{}'.format(current_location, el, duration)
+		temp_state = '{}_{}_{}_{}'.format(start_location, None, el, duration)
 		temp_states.append(temp_state)
 
-	# define random value for explore / exploit decision
+	''' Define random value for explore / exploit decision '''
+
 	rvalue = random.random()
 
-	# if debug == True:
-	# 	print '--START DECIPHER NEXT NODE--'
-	# 	print 'rvalue: {}'.format(rvalue)
-	# 	print 'epsilon: {}'.format(epsilon)
-	# 	print 'next_options: {}'.format(next_options)
-	# 	print 'Q: {}'.format(Q)
-	# 	print 'temp_states: {}'.format(temp_states)
-	# 	print '--END DECIPHER NEXT NODE--'
+	''' Choose next move '''
 
-	# choose move
-	print 'next_options: {}'.format(next_options)
-	print 'temp_states: {}'.format(temp_states)
-	initial_move = choose_next_node(rvalue, epsilon, next_options, tempQ, temp_states)
+	initial_move = choose_next_node(rvalue, epsilon, next_options, \
+		tempQ, temp_states)
 
-	# if debug == True:
-	# 	print 'Initial move: {}'.format(initial_move)
+	''' Update current and previous location while restating
+	the path (in either direction) and state '''
 
-	# update current and previous location
-	previous_location = current_location
-	print 'initial_move: {}'.format(initial_move)
-	current_location = initial_move
-	# if type(initial_move) == set:
-	# 	current_location = list(initial_move)[0]
-	# else:
-	# 	current_location = initial_move
+	#where are you now?
+	#where were you before?
+	#where are you going next? 
+	#how far through the run are you?
 
-	path = '{}_{}'.format(previous_location, current_location)
-	pathr = '{}_{}'.format(current_location, previous_location)
-	state = '{}_{}_{}'.format(previous_location, current_location, duration)
+	state = '{}_{}_{}_{}'.format(start_location, None, initial_move, \
+		duration)	
+	path = '{}_{}'.format(start_location, initial_move)
+	# pathr = '{}_{}'.format(initial_move, start_location)
 
-	# get base reward
-	temp_reward = get_reward(previous_location, current_location)
+	''' Add state to tempQ table if it doesn't exist '''
+	if not state in tempQ.keys():
+		tempQ[state] = 0
 
-	# get adjusted reward
-	if path in traveled:
-		temp_reward -= 10
+	''' Get base reward for chosen move '''
 
-	# determine next maxQ
-	next_options = get_next_nodes(current_location)
-	next_states = []
+	temp_reward = get_reward(start_location, initial_move)
+
+	''' This section determins the Q value of the moves that
+	follow the one just chosen. For example if you chose A-B and
+	from B you can go from B-C or B-D and the Q values are 0 and
+	10 respectively... the max Q value will be 10. This will be
+	used to update the Q value for our current state '''
+
+	if initial_move in neighbor_nodes.keys():
+		next_options = neighbor_nodes[initial_move]
+	else:
+		next_options = get_next_nodes(initial_move)
+		neighbor_nodes[initial_move] = next_options
+
+	next_states = [] # now interpret from nodes into states
 	for el in next_options:
-		temp_state = '{}_{}_{}'.format(current_location, el, duration)
+		temp_state = '{}_{}_{}_{}'.format(initial_move, start_location, el, duration)
 		next_states.append(temp_state)
 
-	if len(tempQ) > 0:
+	if len(tempQ) > 0: # and determine max Q if it exists
 		found_states = []
 		for el in next_states:
 			if el in Q.keys():
 				found_states.append(el)
 		maxQ_next = { k: Q[k] for k in found_states }
 		if len(maxQ_next) > 0:
-			maxQ_next = [ v for k,v in maxQ_next.iteritems() if v == max(maxQ_next.values()) ][0]
+			maxQ_next = [ v for k,v in maxQ_next.iteritems() \
+			if v == max(maxQ_next.values()) ][0]
 		else:
 			maxQ_next = 0
 	else:
 		maxQ_next = 0
 
-	# add state to tempQ table if it doesn't exist
-	if not state in tempQ.keys():
-		tempQ[state] = 0
+	tempQ[state] = tempQ[state] + alpha * (temp_reward + gamma \
+		* maxQ_next - tempQ[state])
 
-	# update Q values
-	# qtemp[state] = qtemp[state] + alpha * (rewards[initial_move] + gamma * maxQ_next - qtemp[state])
-	tempQ[state] = tempQ[state] + alpha * (temp_reward + gamma * maxQ_next - tempQ[state])
+	''' Add chosen path to traveled list (in both directions) '''
 
-	# add chosen path to traveled list
-	traveled.append(path)
-	traveled.append(pathr)
+	traveled.append(start_location)
+	traveled.append(initial_move)
+	pathed.append(path)
+	# pathed.append(pathr)
 
-	# if debug == True:
-	# 	print 'Start location: {}'.format(start_location)
-	# 	print 'Previous location: {}'.format(previous_location)
-	# 	print 'Current location: '.format(current_location)
+	''' Based on chosen move, increment mileage '''
 
-	# increment mileage
-	print 'previous_location: {}'.format(previous_location)
-	previous_coords = get_geocoords(previous_location)
-	print 'current_location: {}'.format(current_location)
-	current_coords = get_geocoords(current_location)
-	mileage += distance_between_nodes(previous_coords, current_coords)
+	if start_location in list_of_coords.keys():
+		start_coords = list_of_coords[start_location]
+	else:
+		start_coords = get_geocoords(start_location)
+		list_of_coords[start_location] = start_coords
 
-	# if debug == True:
-	# 	print 'Traveled nodes: {}'.format(traveled)
-	# 	print 'Mileage: {}'.format(mileage)
+	if initial_move in list_of_coords.keys():
+		current_coords = list_of_coords[initial_move]
+	else:
+		current_coords = get_geocoords(initial_move)
+		list_of_coords[initial_move] = current_coords
 
-	print "STARTING WHILE LOOP..."
+	coords_path = '{}, {}'.format(start_coords, current_coords)
+	coords_pathr = '{}, {}'.format(current_coords, start_coords)
+
+	if coords_path in distances.keys():
+		mileage += distances[coords_path] 
+	elif coords_pathr in distances.keys():
+		mileage += distances[coords_pathr]
+	else:
+		distance = crow_distance_between_nodes(start_coords, current_coords)
+		mileage += distance
+		distances[coords_path] = distance
+		distances[coords_pathr] = distance
+
+	current_location = initial_move
+	previous_location = start_location
+
 	count = 0
 	while start_location != current_location:
 
-		# define possible next nodes
-		# don't need this because already exists above
-		# next_options = get_next_nodes(current_location)
+		''' Determine duration of run at this point and
+			the closest and furthest next point from the start '''
 
-		# if debug == True:
-		# 	print 'Move number: {}'.format(count)
-		# 	print 'Current location: {}'.format(current_location)
-		# 	print 'Next possible locations: {}'.format(next_options)
-
-		# determine duration (high or low) and determine the 
-		# closest and furthest point from start_location 
-		# in list of next options
 		if mileage <= factor * target_mileage:
 			duration = 'low'
 		else:
@@ -456,8 +446,23 @@ for trial in range(n_trials):
 
 		holdme = {}
 		for option in next_options:
-			temp_coords = get_geocoords(option)
-			temp_miles = distance_between_nodes(start_coords, temp_coords)
+			# get geocoords of each next move
+			if option in list_of_coords.keys():
+				temp_coords = list_of_coords[option]
+			else:
+				temp_coords = get_geocoords(option)
+				list_of_coords[option] = temp_coords
+			# get distance from next move to start location
+			temp_path = '{}_{}'.format(temp_coords, start_coords)
+			if temp_path in distances.keys():
+				temp_miles = distances[temp_path]
+			else:
+				try:
+					temp_miles = route_distance_between_nodes(temp_coords, start_coords)
+				except:
+					errors.append('Connection Error')
+					temp_miles = 0
+				# '-71.0719384,42.445134' , '-71.072104,42.4436421'
 			holdme[option] = temp_miles
 
 		closest_point = min(holdme, key=holdme.get)
@@ -467,109 +472,138 @@ for trial in range(n_trials):
 			closest_point = None
 			furthest_point = None
 
-		# if debug == True:
-		# 	print 'Closest point: {}'.format(closest_point)
-		# 	print 'Furthest point: {}'.format(furthest_point)
+		''' Based on current location, next options, and 
+		current mileage. This is used to determine where to
+		go next '''
 
-		# add list of possible states
 		temp_states = []
 		for el in next_options:
-			temp_state = '{}_{}_{}'.format(current_location, el, duration)
+			temp_state = '{}_{}_{}_{}'.format(current_location, previous_location, el, duration)
 			temp_states.append(temp_state)
 
-		# define random value for explore / exploit decision
+		''' Define random value for explore / exploit decision '''
+
 		rvalue = random.random()
 
-		# if debug == True:
-		# 	print '--START DECIPHER NEXT NODE--'
-		# 	print 'rvalue: {}'.format(rvalue)
-		# 	print 'epsilon: {}'.format(epsilon)
-		# 	print 'next_options: {}'.format(next_options)
-		# 	print 'Q: {}'.format(Q)
-		# 	print 'temp_states: {}'.format(temp_states)
-		# 	print '--END DECIPHER NEXT NODE--'
+		''' Choose next move '''
 
-		# choose next node
-		print 'next_options: {}'.format(next_options)
-		print 'temp_state: {}'.format(temp_states)
-		next_move = choose_next_node(rvalue, epsilon, next_options, tempQ, temp_states)
+		next_move = choose_next_node(rvalue, epsilon, next_options, \
+			tempQ, temp_states)
 
-		# if debug == True:
-		# 	print 'Next move: {}'.format(next_move)
+		''' Update current and previous location while restating
+		the path (in either direction) and state '''
 
-		# update current and previous location
+		state = '{}_{}_{}_{}'.format(current_location, previous_location, next_move, \
+			duration)	
+		path = '{}_{}'.format(current_location, next_move)
+		# pathr = '{}_{}'.format(next_move, current_location)
+
+		''' Add state to tempQ table if it doesn't exist '''
+		if not state in tempQ.keys():
+			tempQ[state] = 0
+
+		''' Get base reward for chosen move '''
+
+		temp_reward = get_reward(current_location, next_move)
+
+		''' Get adjusted reward if retracing steps '''
+
+		state_parts = state.split('_')
+		if state_parts[1] == state_parts[2]:
+			temp_reward -= 75 # dont go back to where you just were
+		#elif '{}_{}'.format(state_parts[0], state_parts[2]) in pathed:
+		#	temp_reward -= 50 
+
 		previous_location = current_location
-		print 'next_move: {}'.format(next_move)
 		current_location = next_move
-		# if type(next_move) == set:
-		# 	current_location = list(next_move)[0]
-		# else:
-		# 	current_location = next_move
-		path = '{}_{}'.format(previous_location, current_location)
-		pathr = '{}_{}'.format(current_location, previous_location)
-		state = '{}_{}_{}'.format(previous_location, current_location, duration)
 
-		# get base reward
-		temp_reward = get_reward(previous_location, current_location)
+		if duration == 'low':
+			if current_location == furthest_point and current_location != closest_point:
+				temp_reward += 25
+		if duration == 'high':
+			if current_location == closest_point and current_location != furthest_point:
+				temp_reward += 150 # prevents us from getting 'stuck'
 
-		# get adjusted reward
-		if path in traveled:
-			temp_reward -= 10
+		''' This section determins the Q value of the moves that
+		follow the one just chosen. For example if you chose A-B and
+		from B you can go from B-C or B-D and the Q values are 0 and
+		10 respectively... the max Q value will be 10. This will be
+		used to update the Q value for our current state '''
 
-		if current_location == closest_point and duration == 'low':
-			temp_reward -= 20
-		if current_location == furthest_point and duration == 'high':
-			temp_reward -= 20
+		if current_location in neighbor_nodes.keys():
+			next_options = neighbor_nodes[current_location]
+		else:
+			next_options = get_next_nodes(current_location)
+			neighbor_nodes[current_location] = next_options
 
-		# determine next maxQ
-		next_options = get_next_nodes(current_location)
-		next_states = []
+		next_states = [] # now interpret from nodes into states
 		for el in next_options:
-			temp_state = '{}_{}_{}'.format(current_location, el, duration)
+			temp_state = '{}_{}_{}_{}'.format(current_location, previous_location, el, duration)
 			next_states.append(temp_state)
 
-		if len(tempQ) > 0:
+		if len(tempQ) > 0: # and determine max Q if it exists
 			found_states = []
 			for el in next_states:
-				if el in tempQ.keys():
+				if el in Q.keys():
 					found_states.append(el)
-			maxQ_next = { k: tempQ[k] for k in found_states }
+			maxQ_next = { k: Q[k] for k in found_states }
 			if len(maxQ_next) > 0:
-				maxQ_next = [ v for k,v in maxQ_next.iteritems() if v == max(maxQ_next.values()) ][0]
+				maxQ_next = [ v for k,v in maxQ_next.iteritems() \
+				if v == max(maxQ_next.values()) ][0]
 			else:
 				maxQ_next = 0
 		else:
 			maxQ_next = 0
 
-		# add state to tempQ table if it doesn't exist
-		if not state in tempQ.keys():
-			tempQ[state] = 0
+		tempQ[state] = tempQ[state] + alpha * (temp_reward + gamma \
+			* maxQ_next - tempQ[state])
 
-		# update Q value
-		tempQ[state] = tempQ[state] + alpha * (temp_reward + gamma * maxQ_next - tempQ[state])
+		''' Based on chosen move, increment mileage '''
 
-		# add chosen path to traveled list
-		traveled.append(path)
-		traveled.append(pathr)
+		if previous_location in list_of_coords.keys():
+			previous_coords = list_of_coords[previous_location]
+		else:
+			previous_coords = get_geocoords(previous_location)
+			list_of_coords[previous_location] = previous_coords
 
-		# if debug == True:
-		# 	print 'Previous location: {}'.format(previous_location)
-		# 	print 'Current location: {}'.format(current_location)
+		if current_location in list_of_coords.keys():
+			current_coords = list_of_coords[current_location]
+		else:
+			current_coords = get_geocoords(current_location)
+			list_of_coords[current_location] = current_coords
 
-		# increment mileage
-		print 'previous: {}'.format(previous_location)
-		previous_coords = get_geocoords(previous_location)
-		print 'current: {}'.format(current_location)
-		current_coords = get_geocoords(current_location)
-		# if debug == True:
-		# 	print 'Previous coords: {}'.format(previous_coords)
-		# 	print 'Current coords: {}'.format(current_coords)
-		mileage += distance_between_nodes(previous_coords, current_coords)
+		coords_path = '{}, {}'.format(previous_coords, current_coords)
+		coords_pathr = '{}, {}'.format(current_coords, previous_coords)
+
+		if coords_path in distances.keys():
+			mileage += distances[coords_path]
+		elif coords_pathr in distances.keys():
+			mileage += distances[coords_pathr]
+		else:
+			distance = crow_distance_between_nodes(previous_coords, current_coords)
+			mileage += distance
+			distances[coords_path] = distance
+			distances[coords_pathr] = distance
+
+		''' Add chosen path to traveled list (in both directions) '''
+
+		traveled.append(current_location)
+		''' Add paths to path list '''
+
+		pathed.append(path)
+		# pathed.append(pathr)
+
+		''' Increment count of nodes visited '''
+
+		if mileage > target_mileage * 1.3:
+			break
+
+		if current_location == start_location:
+			break
 
 		count += 1
-		if count > 100:
-			break
-		print 'Miles: {}'.format(mileage)
+		print mileage
+		print 'Move location to: {}'.format(current_location)
 		print 'Count: {}'.format(count)
 
 	Q = tempQ.copy()
@@ -577,32 +611,129 @@ for trial in range(n_trials):
 	# 	print "WITHIN TRGET RANGE!!!, WITHIN TRGET RANGE!!!, WITHIN TRGET RANGE!!!, WITHIN TRGET RANGE!!!, "
 	# 	Q = tempQ.copy()
 
+	if trial % 100 == 0 and trial != 0:
+		time.sleep(30) # so I don't destroy my CPU
+
 #http://www.gpsvisualizer.com/map_input
 
+#http://overpass-api.de/api/map?bbox=-71.1717,42.4166,-71.0246,42.4926
+
+end = time.time()
+
+print (end - start)/60
+
+with open("neighbors.txt", "wb") as f2:
+	pickle.dump(neighbor_nodes, f2)
+
+with open("rewards.txt", "wb") as f2:
+	pickle.dump(rewards, f2)
+
+with open("distances.txt", "wb") as f2:
+	pickle.dump(distances, f2)
+
+with open("listofcoords.txt", "wb") as f2:
+	pickle.dump(list_of_coords, f2)
+
 final_path = []
-def tester(Q):
+def get_final_path(Q):
+	
 	duration = 'low'
-	start_location = '66566291'
+	start_location = '66572004'
+	previous_location = 'None'
+	mileage = 0
+
+	if start_location in list_of_coords.keys():
+		start_coords = list_of_coords[start_location]
+	else:
+		start_coords = get_geocoords(start_location)
+		list_of_coords[start_location] = start_coords
+
 	final_path.append(start_location)
-	current_location = {k:v for k,v in Q.iteritems() if k.startswith(start_location) and k.endswith(duration)}
+	current_location = {k:v for k,v in Q.iteritems() if k.startswith(start_location) and k.split('_')[1] == previous_location and k.endswith(duration)}
 	current_location = [k for k,v in current_location.iteritems() if v==max(current_location.values())]
-	current_location = current_location[0].split('_')[1]
-	distance = distance_between_nodes(start_location, current_location)
+	current_location = current_location[0].split('_')[2]
+	final_path.append(current_location)
+
+	if current_location in list_of_coords.keys():
+		current_coords = list_of_coords[current_location]
+	else:
+		current_coords = get_geocoords(current_location)
+		list_of_coords[current_location] = current_coords	
+
+	distance = crow_distance_between_nodes(start_coords, current_coords)
+
+	mileage += distance
+
+	previous_location = start_location
+
 	count = 0
 	while current_location != start_location:
-		movement = {k:v for k,v in Q.iteritems() if k.startswith(current_location)}
+		movement = {k:v for k,v in Q.iteritems() if k.startswith(current_location) and k.split('_')[1] == previous_location and k.endswith(duration)}
 		movement = [k for k,v in movement.iteritems() if v==max(movement.values())]
-		movement = movement[0].split('_')[1]
+		movement = movement[0].split('_')[2]
 		final_path.append(movement)
+
+		if movement in list_of_coords.keys():
+			movement_coords = list_of_coords[movement]
+		else:
+			movement_coords = get_geocoords(movement)
+			list_of_coords[movement] = movement_coords	
+
+		distance = crow_distance_between_nodes(current_coords, movement_coords)		
+
 		current_location = movement
+		current_coords = movement_coords
+
+		mileage += distance
+
+		if mileage <= factor * target_mileage:
+			duration = 'low'
+		else:
+			duration = 'high'
+
+		previous_location = final_path[len(final_path)-2]
+
 		count += 1
-		if count > 50:
+		if mileage > target_mileage:
 			break
 
-tester(Q)
+		print mileage
+		print duration
+
+get_final_path(Q)
 print final_path
 
-final_geo = []
-for el in final_path:
-	coords = get_geocoords(el)
-	final_geo.append('{},{}'.format(coords.split(',')[1], coords.split(',')[0]))
+def get_final_geos(final_path):
+	''' takes list of OSM nodes returns list of coordinates '''
+
+	final_geo = []
+	for el in final_path:
+		if el in list_of_coords.keys():
+			movement_coords = list_of_coords[el]
+		else:
+			movement_coords = get_geocoords(el)
+			list_of_coords[el] = movement_coords	
+		final_geo.append('{},{}'.format(movement_coords.split(',')[1], movement_coords.split(',')[0]))
+
+	return final_geo
+
+FINAL_GEO = get_final_geos(final_path)
+
+import csv
+with open ('route.csv', 'wb') as csvfile:
+	routewriter = csv.writer(csvfile)
+	routewriter.writerow(["LAT", "LON"])
+	for el in FINAL_GEO:
+		temp = el.split(',')
+		routewriter.writerow([temp[0], temp[1]])
+
+# # http://www.gpsvisualizer.com/map_input
+# # https://www.darrinward.com/lat-long/?id=3060847
+# https://arxiv.org/pdf/0903.4930.pdf
+
+# crow distance good for incrementing distance between points... not for determining closest and furthestest next point
+
+# how to plot route in r
+# https://www.visualcinnamon.com/2014/03/running-paths-in-amsterdam-step-2.html
+# https://www.darrinward.com/lat-long/?id=3141130
+
