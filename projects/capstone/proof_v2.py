@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+'''
+docker run -t -i -p 5000:5000 -v $(pwd):/data osrm/osrm-backend osrm-routed /data/massachusetts-latest.osrm
+'''
+
 import random # to support explore/exploit decision
 import requests # to call routing service
 import json # to parse response from routing service
@@ -253,12 +257,13 @@ def get_next_nodes_2(current_location):
 
 	return next_nodes
 
+r_base = 1000
 
 def get_reward(node1, node2):
 	''' Using 2 nodes, determine reward of moving between them
-		if run on trail, reward + 5
-		if run past natural scene (water), reward + 5
-		if run past historic site, reward + 5 '''
+		if run on trail, reward + x
+		if run past natural scene (water), reward + x
+		if run past historic site, reward + x '''
 
 	reward = 0
 
@@ -272,11 +277,15 @@ def get_reward(node1, node2):
 			new_tag_list = []
 			for oldtag in taglist:
 				new_tag_list.append(oldtag.get('k'))
-			keywords = ['natural', 'waterway', 'bicycle', 'foot', 'checkpoint', 'mountain_pass', 'historic']
-			if any(word in keywords for word in new_tag_list):
-				# TODO: if way has 2 things, double up reward
-				# reward += 25
-				reward += 50
+				new_tag_list.append(oldtag.get('v'))
+			keywords = ['natural', 'waterway', 'bicycle', 'foot', 'checkpoint', 'mountain_pass', 'historic',
+					    'path', 'hiking', 'unpaved', 'footway']
+			count = 0
+			for el in new_tag_list:
+				if el in keywords:
+					count += 1
+			print '{}: {}'.format('Count of rewards present', count)
+			reward = reward + (r_base * count)
 
 	return reward
 
@@ -316,6 +325,7 @@ if os.path.exists('distances.txt'):
 else:
 	distances = {}
 
+# distances = {}
 neighbor_nodes = {}
 rewards = {}
 list_of_coords = {}
@@ -324,20 +334,33 @@ list_of_coords = {}
 Q = {}
 
 # define paramters
-gamma = 0.1 # high gamma led to poor results
-alpha = 1.0 # environment is deterministic
-factor = 0.5 # err on the side of longer run
+gamma = 0.9
+alpha = 1.0
+factor_radius = 0.45 # err on the side of longer run
+factor_duration = 0.85
 target_mileage = 1.0
-n_trials = 50 # int(2.71828 ** (-0.153 * target_mileage) * 219.09 * target_mileage)
+n_trials = 500 # int(2.71828 ** (-0.153 * target_mileage) * 219.09 * target_mileage)
 errors = [] # stores error in event call to routing service fails
+rewards = []
 start_location = '66572004' # stone place, melrose
+
+# 500 iterations for 1 mile
+# 1000 iterations for 3 miles
+# 1500 iterations for 5 miles?
+
+r_back = 10000
+r_retrace = 15000
+r_finish = 10000000
+r_low = 0
+r_high = 30000000000
 
 ''' Run similation '''
 
 for trial in range(n_trials):
 
 	print(trial)
-	epsilon = math.cos(1.6/n_trials*trial)
+	epsilon = math.cos(1.5/n_trials*trial)
+	# alpha = math.cos(1.6/n_trials*trial)
 
 	''' Define start node, coords for 
 	start location and an empty list to store traveled
@@ -416,7 +439,14 @@ for trial in range(n_trials):
 
 	next_states = [] # now interpret from nodes into states
 	for el in next_options:
-		temp_state = '{}_{}_{}_{}'.format(initial_move, start_location, el, duration)
+		super_temp_radius_distance = route_distance_between_nodes(el, start_location)
+		super_temp_duration_distance = 
+
+
+		if duration == 'low':
+			if distance_from_origin > factor_radius * target_mileage or mileage > factor_duration * target_mileage:
+				duration = 'high'		
+		temp_state = '{}_{}_{}_{}'.format(initial_move, start_location, el, next_duration)
 		next_states.append(temp_state)
 
 	if len(Q) > 0: # and determine max Q if it exists
@@ -460,9 +490,8 @@ for trial in range(n_trials):
 	coords_pathr = '{}, {}'.format(current_coords, start_coords)
 
 	if coords_path in distances.keys():
-		mileage += distances[coords_path] 
-	elif coords_pathr in distances.keys():
-		mileage += distances[coords_pathr]
+		mileage += distances[coords_path]
+		print 'Skipping API'
 	else:
 		distance = route_distance_between_nodes(start_coords, current_coords)
 		mileage += distance
@@ -473,15 +502,25 @@ for trial in range(n_trials):
 	previous_location = start_location
 
 	count = 0
+	miles = [mileage]
+	journey = 1
 	while start_location != current_location:
 
 		''' Determine duration of run at this point and
 			the closest and furthest next point from the start '''
 
-		if mileage <= factor * target_mileage:
-			duration = 'low'
-		else:
-			duration = 'high'
+		# if mileage <= factor * target_mileage:
+		# 	duration = 'low'
+		# else:
+		# 	duration = 'high'
+
+		distance_from_origin = route_distance_between_nodes(current_coords, start_coords)
+		print 'Distance from origin: {}'.format(distance_from_origin)
+		print 'Miles already run: {}'.format(mileage)
+		if duration == 'low':
+			if distance_from_origin > factor_radius * target_mileage or mileage > factor_duration * target_mileage:
+				duration = 'high'
+		print 'Duration: {}'.format(duration)
 
 		holdme = {}
 		for option in next_options:
@@ -495,6 +534,7 @@ for trial in range(n_trials):
 			temp_path = '{}_{}'.format(temp_coords, start_coords)
 			if temp_path in distances.keys():
 				temp_miles = distances[temp_path]
+				# print "Skipping API"
 			else:
 				try:
 					temp_miles = route_distance_between_nodes(temp_coords, start_coords)
@@ -542,28 +582,29 @@ for trial in range(n_trials):
 		''' Get base reward for chosen move '''
 
 		temp_reward = get_reward(current_location, next_move)
+		rewards.append(temp_reward)
 
 		''' Get adjusted reward if retracing steps '''
 
 		state_parts = state.split('_')
 		if state_parts[1] == state_parts[2]:
-			temp_reward -= 400 # dont go back to where you just were
+			temp_reward -= r_back # dont go back to where you just were
 		elif '{}_{}'.format(state_parts[0], state_parts[2]) in pathed:
-			temp_reward -= 50
+			temp_reward -= r_retrace
 
 		previous_location = current_location
 		current_location = next_move
 
 		if duration == 'high':
 			if current_location == start_coords:
-				temp_reward += 10000
+				temp_reward += r_finish
 
-		# if duration == 'low':
-		# 	if current_location == furthest_point and current_location != closest_point:
-		# 		temp_reward += 25
+		if duration == 'low':
+			if current_location == furthest_point and current_location != closest_point:
+				temp_reward += r_low
 		if duration == 'high':
 			if current_location == closest_point and current_location != furthest_point:
-				temp_reward += 200
+				temp_reward += r_high
 
 		''' This section determins the Q value of the moves that
 		follow the one just chosen. For example if you chose A-B and
@@ -618,8 +659,7 @@ for trial in range(n_trials):
 
 		if coords_path in distances.keys():
 			mileage += distances[coords_path]
-		elif coords_pathr in distances.keys():
-			mileage += distances[coords_pathr]
+			# print "Skipping API"
 		else:
 			distance = route_distance_between_nodes(previous_coords, current_coords)
 			mileage += distance
@@ -628,12 +668,21 @@ for trial in range(n_trials):
 
 		''' Add chosen path to traveled list (in both directions) '''
 		traveled.append(current_location)
+		miles.append(mileage)
 
 		''' Add paths to path list '''
 		pathed.append(path)
 
-		if mileage > target_mileage * 1.3:
+		if mileage > target_mileage * 1.1:
 			break
+			# print 'High miles. This is happening.'
+			# if journey == 1:
+			# 	current_location = traveled[count/2]
+			# 	mileage = miles[count/2]
+			# 	journey += 1
+			# 	print 'Miles: {}, traveled: {}, Current Miles: {}, Current Location: {}'.format(miles, traveled, mileage, current_location)
+			# else:
+			# 	break
 
 		if current_location == start_location:
 			break
@@ -641,7 +690,7 @@ for trial in range(n_trials):
 		count += 1
 
 	if trial % 100 == 0 and trial != 0:
-		time.sleep(30) # so I don't destroy my CPU
+		time.sleep(15) # give me a break..
 
 
 # Write new distances into file
@@ -652,6 +701,8 @@ with open("distances.txt", "wb") as f2:
 final_path = []
 final_miles = []
 def get_final_path(Q):
+
+	print 'FINAL RUN. FINAL RUN. FINAL RUN. FINAL RUN.'
 	
 	duration = 'low'
 	start_location = '66572004'
@@ -670,9 +721,9 @@ def get_final_path(Q):
 	current_location = current_location[0].split('_')[2]
 	final_path.append(current_location)
 
-# {k:v for k,v in Q.iteritems() if k.startswith( '616527794') and \
-# k.split('_')[1] ==  '616527723' and \
-# k.endswith('high')}
+{k:v for k,v in Q.iteritems() if k.startswith('616527347') and \
+k.split('_')[1] ==  '616527487' and \
+k.endswith('low')}
 
 	if current_location in list_of_coords.keys():
 		current_coords = list_of_coords[current_location]
@@ -706,10 +757,17 @@ def get_final_path(Q):
 
 		mileage += distance
 
-		if mileage <= factor * target_mileage:
-			duration = 'low'
-		else:
+		# if mileage <= factor * target_mileage:
+		# 	duration = 'low'
+		# else:
+		# 	duration = 'high'
+
+		distance_from_origin = route_distance_between_nodes(current_coords, start_coords)
+		print distance_from_origin
+		print mileage
+		if distance_from_origin > factor_radius * target_mileage or mileage > factor_duration * target_mileage:
 			duration = 'high'
+		print duration
 
 		previous_location = final_path[len(final_path)-2]
 
@@ -719,28 +777,29 @@ def get_final_path(Q):
 
 		final_miles.append(mileage)
 
-		print mileage
-		print duration
-
 get_final_path(Q)
 
-# def get_final_geos(final_path):
-# 	''' takes list of OSM nodes returns list of coordinates '''
+print 'Trials: {}, Alpha: {}, Gamma: {}, Total Miles: {}, r_base: {}, r_back: {}, \
+		r_retrace: {}, r_finish: {}, r_low: {}, r_high: {}'.format(n_trials, alpha, \
+		gamma, mileage, r_base, r_back, r_retrace, r_finish, r_low, r_high)
 
-# 	final_geo = []
-# 	for el in final_path:
-# 		if el in list_of_coords.keys():
-# 			movement_coords = list_of_coords[el]
-# 		else:
-# 			movement_coords = get_geocoords(el)
-# 			list_of_coords[el] = movement_coords	
-# 		final_geo.append('{},{}'.format(movement_coords.split(',')[1], movement_coords.split(',')[0]))
+def get_final_geos(final_path):
+	''' takes list of OSM nodes returns list of coordinates '''
 
-# 	return final_geo
+	final_geo = []
+	for el in final_path:
+		if el in list_of_coords.keys():
+			movement_coords = list_of_coords[el]
+		else:
+			movement_coords = get_geocoords(el)
+			list_of_coords[el] = movement_coords	
+		final_geo.append('{},{}'.format(movement_coords.split(',')[0], movement_coords.split(',')[1]))
 
-# FINAL_GEO = get_final_geos(final_path)
+	return final_geo
 
-last_path = get_coords_in_route(final_path)
+last_path = get_final_geos(final_path)
+
+# last_path = get_coords_in_route(final_path)
 with open ('route.csv', 'wb') as csvfile:
 	routewriter = csv.writer(csvfile)
 	routewriter.writerow(["LAT", "LON"])
@@ -748,6 +807,8 @@ with open ('route.csv', 'wb') as csvfile:
 		temp = el.split(',')
 		print temp
 		routewriter.writerow([temp[1], temp[0]])
+
+
 
 
 
