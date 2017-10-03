@@ -3,6 +3,7 @@
 
 '''
 docker run -t -i -p 5000:5000 -v $(pwd):/data osrm/osrm-backend osrm-routed /data/massachusetts-latest.osrm
+docker run -t -i -p 5000:5000 -v $(pwd):/data osrm/osrm-backend osrm-routed /data/new-york-latest.osrm    # testing ny
 '''
 
 import random # to support explore/exploit decision
@@ -19,6 +20,7 @@ import time
 
 # Define file name
 filename = 'streets_to_run.osm'
+# filename = 'ny_streets.osm' # testing ny
 
 # Parse the smaller OSM file
 # Used in building the route
@@ -32,6 +34,7 @@ end = time.time()
 # Used in creating the final visulazations
 start = time.time()
 tree2 = ET.parse('map')
+# tree2 = ET.parse('raw_ny_osm') # testing ny
 root2 = tree2.getroot()
 end = time.time()
 # print end-start
@@ -67,12 +70,9 @@ def extract_intersections(nodes_or_coords='nodes', verbose=True):
 	else:
 		return intersection_coordinates
 
-start = time.time()
-test = extract_intersections()
-end = time.time()
-print end-start
 
 ''' Below chuncks of code used for writing project document '''
+''' Need to load all functions in this file before running '''
 
 # test = extract_intersections(verbose=False)
 # with open ('intersections.csv', 'wb') as csvfile:
@@ -98,6 +98,8 @@ print end-start
 # 		temp = el.split(',')
 # 		routewriter.writerow([temp[0], temp[1]])
 
+''' Above chuncks of code used for writing project document '''
+
 
 def get_node_geocoords(node_id):
 	''' parses osm file and returns lat lon coords
@@ -109,6 +111,7 @@ def get_node_geocoords(node_id):
 	else:
 		for node in root.findall(".//node[@id='"+node_id+"']"):
 			node_coords = node.get('lon') + ',' + node.get('lat')
+		
 		list_of_coords[node_id] = node_coords
 
 	return node_coords	
@@ -580,20 +583,20 @@ def get_close_far(path_type, next_options):
 
 ''' If data point exists, don't call function again, call from dictionary '''
 
-if os.path.exists('distances_crow.txt'):
-	with open("distances_crow.txt", "rb") as f:
-		distances_crow = pickle.load(f)
-else:
-	distances_crow = {}
+# if os.path.exists('distances_crow.txt'):
+# 	with open("distances_crow.txt", "rb") as f:
+# 		distances_crow = pickle.load(f)
+# else:
+# 	distances_crow = {}
 
-if os.path.exists('distances_path.txt'):
-	with open("distances_path.txt", "rb") as f:
-		distances_path = pickle.load(f)
-else:
-	distances_path = {}
+# if os.path.exists('distances_path.txt'):
+# 	with open("distances_path.txt", "rb") as f:
+# 		distances_path = pickle.load(f)
+# else:
+# 	distances_path = {}
 
-# distances_crow = {}
-# distances_path = {}
+distances_crow = {}
+distances_path = {}
 neighbor_nodes = {}
 rewards = {}
 list_of_coords = {}
@@ -606,10 +609,11 @@ gamma = 0.5
 # alpha = 0.5
 factor_radius = 0.5
 factor_duration = 0.6
-base_target_mileage = 5.0
+base_target_mileage = 1.0
 n_trials = int(base_target_mileage * 400)
 errors = [] # stores error in event call to routing service fails
 start_location = '66572004' # stone place, melrose
+# start_location = '213774020' # 40.87651, -73.31783 # Jeanne Pl. E. Northport NY NEEDS TO START AT INTERSECTION
 q_initialization_value = 0
 growth_factor = 1.0 + ((base_target_mileage/2) * 0.0)
 q_type = 'max'
@@ -618,7 +622,6 @@ recalc_duration_type = 'path_wise'
 
 # define reward structure
 r_back = 20000
-r_retrace = 0#5000
 r_finish = 4000
 r_low = 2000
 r_high = 30000
@@ -792,38 +795,15 @@ for trial in range(n_trials):
 
 		''' Get adjusted reward if going back or retracing steps '''
 
-		# state_parts = state.split('_')
-		# if state_parts[1] == state_parts[2]:
-		# 	temp_reward -= r_back # dont go back to where you just were
-
 		state_parts = state.split('_')
 		if state_parts[1] != state_parts[2]:
 			temp_reward += r_back # dont go back to where you just were
-
-		# if next_move == start_location:
-		# 	if duration == 'high':
-		# 		temp_reward += r_finish
-		# 	if duration == 'low':
-		# 		temp_reward -= r_finish
 
 		if next_move == start_location:
 			if duration == 'high':
 				temp_reward += r_finish
 			# if duration == 'low':
 			# 	temp_reward -= r_finish
-
-		# if duration == 'low':
-		# 	# if next_move == close_and_far['furthest_point'] and next_move != close_and_far['closest_point']:
-		# 	# 	temp_reward += r_low
-		# 	if next_move != close_and_far['closest_point']:
-		# 		temp_reward += r_low
-		# if duration == 'high':
-		# 	# if next_move == close_and_far['closest_point'] and next_move != close_and_far['furthest_point']:
-		# 	# 	temp_reward += r_high
-		# 	if next_move != close_and_far['furthest_point']:
-		# 		temp_reward += r_high
-		
-#################
 
 		if duration == 'low':
 			if next_move == close_and_far_crow['furthest_point'] or next_move == close_and_far_path['furthest_point']:
@@ -833,29 +813,9 @@ for trial in range(n_trials):
 			if next_move == close_and_far_crow['closest_point'] or next_move == close_and_far_path['closest_point']:
 				temp_reward += r_high
 
-
 		''' Based on chosen move, increment mileage '''
 
 		mileage = increment_mileage(mileage, current_location, next_move)
-
-		''' Update retrace here '''
-
-		# if duration == 'high':
-		# 	retrace_duration = 'high'
-		# else:
-		# 	retrace_duration = 'low'
-		# else:
-		# 	distance_from_origin = route_distance_between_nodes(get_node_geocoords(next_move), start_coords)
-		# 	if distance_from_origin > target_mileage * factor_radius or mileage > target_mileage * factor_duration:
-		# 		retrace_duration = 'high'
-		# 	else:
-		# 		retrace_duration = 'low'
-
-		# if next_move in traveled and path not in pathed and retrace_duration == 'low':
-		# 	temp_reward -= r_retrace
-
-		# if next_move in traveled and retrace_duration == 'low':
-		# 	temp_reward -= r_retrace
 
 		''' This section determins the Q value of the moves that
 		follow the one just chosen. For example if you chose A-B and
@@ -917,11 +877,13 @@ end_run = time.time()
 
 print 'Total Run Time: {}'.format(str(end_run-start_run))
 
-#Write new distances into file
-with open("distances_crow.txt", "wb") as f2:
-	pickle.dump(distances_crow, f2)
-with open("distances_path.txt", "wb") as f3:
-	pickle.dump(distances_path, f3)
+# #Write new distances into file
+# with open("distances_crow.txt", "wb") as f2:
+# 	pickle.dump(distances_crow, f2)
+# with open("distances_path.txt", "wb") as f3:
+# 	pickle.dump(distances_path, f3)
+
+''' Policy is determined, see where it runs you '''
 
 final_path = []
 final_miles = []
@@ -930,7 +892,6 @@ def get_final_path(Q):
 	print 'FINAL RUN. FINAL RUN. FINAL RUN. FINAL RUN.'
 	
 	duration = 'low'
-	start_location = '66572004'
 	previous_location = 'None'
 	mileage = 0
 
@@ -976,6 +937,8 @@ def get_final_path(Q):
 
 get_final_path(Q)
 
+
+''' Write final path coordinates to csv to visualize '''
 
 last_path = get_coords_in_route(final_path)
 with open ('route.csv', 'wb') as csvfile:
