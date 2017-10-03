@@ -169,7 +169,7 @@ We will use the results of this in Section IV. Results - Model Evaluation and Va
   * wget http://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf
   * docker run -t -v $(pwd):/data osrm/osrm-backend osrm-extract -p /opt/foot.lua /data/new-york-latest.osm.pbf
   * docker run -t -v $(pwd):/data osrm/osrm-backend osrm-contract /data/new-york-latest.osrm
-  * docker run -t -i -p 5000:5000 -v $(pwd):/data osrm/osrm-backend osrm-routed /data/massachusetts-latest.osrm
+  * docker run -t -i -p 5000:5000 -v $(pwd):/data osrm/osrm-backend osrm-routed /data/new-york-latest.osrm
   * Fire up the osrm calling the NY map and then run the engine.py file using ny_streets.osm
 
 
@@ -237,11 +237,11 @@ https://discussions.udacity.com/t/rl-capstone-project/231147/10
 This project now proves that q-learning can be used to solve this problem, but not necessarily at the desired speed. 
 Although the model was built and tested from a single start location, in order to show the robustness of the model I test the results on 2 different start locations. Note that I finalized the model on the initial test location (Stone Place, Melrose MA.) before testing it on the other random start location (Jeanne Pl. in East Northport NY). I used 3 miles as the test target mileage. Here’s what happened:
 
-Starting on Jeanne Pl. in East Northport NY here is what the 1 mile loop would look like after 400 trials. Note that the closest marked trail that I can think of qualitatively is about 1 mile away… so I wouldn’t expect to hit trails here, but maybe I’ll be surprised at what happens. 
+Starting at Jeanne Pl. in East Northport NY (where it intersects with Squire Dr.) here is what the 1 mile loop would look like after 400 trials. Note that the closest marked trail that I can think of qualitatively is about 1 mile away… so I wouldn’t expect to hit trails here. Interestingly, when I look at the open street map data for my home town, the trail coverage is poor -- I may need to fix that eventually. This is the result...
 
-HOLDER HOLDER HOLDER
+![image](figures/ny_route.png)
 
-The result is sufficient because even though we can’t get to a trail, it still creates a decent loop for a 1 mile run. This tells me we are OK to use 400 iterations per mile. With constant usage and feedback from actual runners, we’ll be able to vastly improve the quality of the paths this algorithm creates. 
+The result is sufficient because even though we can’t get to a trail, it still creates a decent loop for a 1 mile run (actually comes in at 0.98 miles). This tells me we are OK to use 400 iterations per mile. With constant usage and feedback from actual runners, we’ll be able to vastly improve the quality of the paths this algorithm creates. 
 
 ### Justification
 
@@ -259,33 +259,43 @@ If we go back to the original question -- where should I run? -- there is no dou
 
 The testing above was based on a 1 mile loop. The below visualization shows us what happens when we increase the target mileage of the run. Since we used 400 trials for 1 mile, I used 800 trials for 2 miles, 1200 trials for 3 miles, 1600 trials for 4 miles and 20000 trials for the 5 mile run. For each mileage band, I included how long it took the algorithm to run. 
 
-*1 mile target - 1.0 miles result - 1 minute, 40 seconds*
+*1 mile target - 1.0 miles result - 1 minute, 40 seconds.*
 Forms a nice run to the nearest trail head, creates a loop, and returns back to home base. 
 
 ![image](figures/400_trials.png)
 
-*2 miles target - 1.56 mile result - 5 minutes, 30 seconds*
-
+*2 miles target - 1.56 mile result - 5 minutes, 30 seconds.*
+Finds the trail. Creates a decent loop but incurs an out and back component.
 
 ![image](figures/2mile_400trials.png)
 
-*3 miles target - 2.14 mile result - 11 minutes, 42 seconds*
+*3 miles target - 2.14 mile result - 11 minutes, 42 seconds.*
+Not a terrible 3 mile run. Goes out and finds a nice loop in the trails, but incurs an odd additional path around steps 525.
+
 ![image](figures/3miles_400trials.png)
 
-*4 miles target - 3.52 mile result - 19 minutes, 47 seconds*
+*4 miles target - 3.52 mile result - 19 minutes, 47 seconds.*
+Good start by finding a decent loop in the trails, but then the last part of the run is an out and back on the roads.
+
 ![image](figures/4miles_400trials.png)
 
 *5 miles target - 3.54 mile result - 46 minutes, 48 seconds*
+This path falls far short of the target mileage. Additionally, the runner get's stuck in a loop (at least it's in the trail). This is because that inner loop contains a beautiful view of the Boston skyline and the reward for that loop is magnified relative to the surrounding options.
+
 ![image](figures/5miles_400trials.png)
+
 
 ### Reflection
 
-My initial reaction to thinking about the time and energy that has already gone into this project is that I should have just done a Kaggle contest for my capstone project. However, even though the project hasn’t been as successful as I had hoped yet I do believe that I understand more about geospatial data and reinforcement learning than 99.9% of data analysts out there which feels good. There are a multitude of applications for this including automobile navigation. Another idea has was people being able to walk through the safest parts of town (especially when they are in unfamiliar neighborhoods), but this would require an additional set of crime data and location. 
+My initial reaction to thinking about the time and energy that has already gone into this project is that I should have just done a Kaggle contest for my capstone project. However, even though the project hasn’t been as successful as I had hoped yet I do believe that I understand more about geospatial data and reinforcement learning than 99.9% of data analysts out there which feels good. There are a multitude of applications for this including automobile navigation. Another idea applies to neighborhood safety. I imagine an app where people can walk through the safest parts of town (especially when they are in unfamiliar neighborhoods), but this would require an additional set of crime data and location. 
 
 ### Improvement
 
-There is certainly room for improvement. First of all, not all the routes that this algorithm creates are good. Second, the time this takes to calculate is not sufficient. I’m not exactly sure what kind of deep learning can be applied here, but I believe that is the next step. As soon as I get the sign off on this project I will be applying the the Deep Learning Nanodegree to see if I can make that happen. 
-I do wish that I could run multiple models at the same time with varying parameters and then average the results of the models. It’s possible this would greatly improve the resulting paths and decrease time to train the models. 
+There is certainly room for improvement. First of all, not all the routes that this algorithm creates are mediocre at best. The algorithm seems to consistently deliver running loops that fall short of the target mileage.
+
+Second, the time this takes to calculate is not sufficient. I’m not exactly sure what kind of deep learning can be applied here, but I believe that is the next step. As soon as I get the sign off on this project I will be applying the the Deep Learning Nanodegree to see if I can make that happen. 
+
+Lastly, I do wish that I could run multiple models at the same time with varying parameters and then average the results of the models. It’s possible this would greatly improve the resulting paths and decrease time to train the models. 
 
 
 ## VI. Resources
